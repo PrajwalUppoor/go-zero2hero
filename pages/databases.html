@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Databases & Storage — Go: Zero → Hero</title>
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar-root"></aside>
+  <main class="main">
+    <div class="crumbs"><a href="../index.html">Home</a> / System Design / Databases</div>
+    <section class="page-header">
+      <div>
+        <h1>Databases & Storage</h1>
+        <p>Pick the right store; design the right schema; understand the engine. Senior interviews probe deeply here.</p>
+      </div>
+    </section>
+
+    <h2 data-cram="essential">Mental model</h2>
+    <ul>
+      <li><b>Pick the storage primitive first</b>: relational (rows + ACID), document (JSON), wide-column (partition + clustering), KV (sub-ms read), graph (traversals), search (inverted index), warehouse (column-store, OLAP).</li>
+      <li><b>Two storage engine families</b>: <b>B-tree</b> (Postgres, MySQL InnoDB) for balanced read/write OLTP; <b>LSM-tree</b> (RocksDB, Cassandra) for high write throughput, sequential I/O.</li>
+      <li><b>Replicate for read scale + availability; shard for write scale + storage</b>. They are different problems with different solutions.</li>
+      <li><b>Distributed transactions are slow and brittle.</b> Saga + idempotency + outbox is the modern playbook; 2PC only when truly required.</li>
+      <li><b>"Index before you scale"</b> — the right indexes turn O(n) scans into O(log n) lookups before you reach for sharding.</li>
+    </ul>
+
+    <h2 data-cram="essential">SQL vs NoSQL — when each wins</h2>
+    <table>
+      <thead><tr><th>Need</th><th>Pick</th></tr></thead>
+      <tbody>
+        <tr><td>Strong relations, transactions, joins</td><td>SQL (Postgres, MySQL)</td></tr>
+        <tr><td>Flexible schema, document-shaped data</td><td>Document (Mongo, DynamoDB)</td></tr>
+        <tr><td>Massive write throughput, time-series</td><td>Wide-column (Cassandra, Scylla)</td></tr>
+        <tr><td>Hot key-value with sub-ms reads</td><td>KV (Redis, DynamoDB, Memcached)</td></tr>
+        <tr><td>Traversals over relationships</td><td>Graph (Neo4j, JanusGraph)</td></tr>
+        <tr><td>Full-text search & analytics</td><td>Elasticsearch / OpenSearch</td></tr>
+        <tr><td>OLAP / data warehouse</td><td>Snowflake, BigQuery, Redshift</td></tr>
+        <tr><td>Append-only event log</td><td>Kafka (as storage) + KSQL</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Storage engines</h2>
+    <ul>
+      <li><b>B-tree</b> (Postgres, MySQL InnoDB) — balanced reads/writes, good for OLTP, in-place updates.</li>
+      <li><b>LSM-tree</b> (Cassandra, RocksDB, LevelDB) — sequential writes, background compaction; high write throughput, read amplification.</li>
+      <li><b>Heap + indexes</b> — Postgres; secondary indexes point to row TID.</li>
+      <li><b>Column-store</b> (BigQuery, ClickHouse) — wide row scans, massive compression, OLAP queries.</li>
+    </ul>
+
+    <h2 data-cram="essential">ACID, ANSI isolation levels & anomalies</h2>
+    <table>
+      <thead><tr><th>Level</th><th>Prevents</th></tr></thead>
+      <tbody>
+        <tr><td>Read uncommitted</td><td>—</td></tr>
+        <tr><td>Read committed</td><td>Dirty read</td></tr>
+        <tr><td>Repeatable read</td><td>Non-repeatable read</td></tr>
+        <tr><td>Snapshot isolation</td><td>+ phantom (mostly); allows write skew</td></tr>
+        <tr><td>Serializable</td><td>Everything; behaves like one-at-a-time</td></tr>
+      </tbody>
+    </table>
+    <ul>
+      <li>Postgres default = Read Committed. MySQL InnoDB default = Repeatable Read (with gap locks).</li>
+      <li>For multi-statement workflows that must be atomic, wrap in a transaction; for high contention, prefer optimistic locking.</li>
+    </ul>
+
+    <h2 data-cram="essential">Indexing rules of thumb</h2>
+    <ul>
+      <li>Index every column that appears in <code class="inline">WHERE</code>, <code class="inline">JOIN</code>, <code class="inline">ORDER BY</code> for hot queries.</li>
+      <li><b>Composite index (a, b, c)</b> serves queries on a, (a,b), (a,b,c) — not on b or c alone.</li>
+      <li><b>Covering index</b>: include all selected columns to avoid a heap lookup.</li>
+      <li>Each index slows writes and grows storage; review usage with <code class="inline">EXPLAIN</code> / pg_stat_user_indexes.</li>
+      <li>Partial indexes for skewed predicates (<code class="inline">WHERE status='pending'</code>).</li>
+      <li>Hash indexes for equality lookups; GIN/GiST for arrays, JSON, geo.</li>
+    </ul>
+
+    <h2 data-cram="essential">Sharding strategies</h2>
+    <ul>
+      <li><b>Hash sharding</b> — even load, bad for range queries, hot keys still possible.</li>
+      <li><b>Range sharding</b> — good for range queries, prone to hot ranges (e.g. by timestamp).</li>
+      <li><b>Directory-based</b> — explicit lookup map per tenant; flexible but a SPOF risk.</li>
+      <li><b>Consistent hashing</b> — minimal remap on resharding; use virtual nodes.</li>
+    </ul>
+
+    <h2>Replication</h2>
+    <ul>
+      <li><b>Single-leader</b> (PG, MySQL) — strong on the leader, eventual on replicas; failover via Patroni/Orchestrator.</li>
+      <li><b>Multi-leader</b> — multi-region writes; conflict resolution (LWW, CRDT, vector clocks).</li>
+      <li><b>Leaderless</b> (Cassandra, Dynamo) — quorum R+W&gt;N for strong consistency, read repair, hinted handoff.</li>
+    </ul>
+
+    <h2>Distributed transactions</h2>
+    <ul>
+      <li>Avoid two-phase commit across services — it's slow and partition-fragile.</li>
+      <li><b>Saga</b>: sequence of local txns with compensating actions (choreography via events, or central orchestrator).</li>
+      <li><b>Transactional outbox</b>: write business state + event row in same DB tx; relay publishes to broker.</li>
+      <li><b>Idempotency keys</b> on every mutation API to allow safe retries.</li>
+    </ul>
+
+    <h2>Postgres-specific power moves</h2>
+    <ul>
+      <li>JSONB columns + GIN index for semi-structured data.</li>
+      <li>Logical replication for CDC into Kafka/ES.</li>
+      <li>Range partitioning by time + automated detach for retention.</li>
+      <li>SKIP LOCKED for queue-on-Postgres patterns.</li>
+      <li><code class="inline">SERIALIZABLE</code> uses SSI — performance hit but no manual locks.</li>
+    </ul>
+
+    <h2>Cassandra-specific</h2>
+    <ul>
+      <li>Model around queries: pick a partition key that bounds rows per partition (~10s of MB).</li>
+      <li>Tunable consistency: ONE / QUORUM / ALL. R+W&gt;N for strong.</li>
+      <li>No joins. Denormalize and write to multiple tables.</li>
+    </ul>
+
+    <h2>Backups & disaster recovery</h2>
+    <ul>
+      <li>Daily full + WAL-shipping incremental (RPO seconds, RTO minutes).</li>
+      <li>Point-in-time recovery is mandatory for finance/critical data.</li>
+      <li>Test restores periodically — an untested backup doesn't exist.</li>
+      <li>Cross-region replication; documented run-book for region failover.</li>
+    </ul>
+
+    <h2>Schema migrations safely</h2>
+    <ul>
+      <li>Expand-and-contract: add new column / table → backfill → switch reads → switch writes → drop old.</li>
+      <li>Avoid table rewrites in big tables (<code class="inline">ALTER TABLE ... ADD COLUMN ... DEFAULT</code> may rewrite); use partial backfills.</li>
+      <li>Online schema change tools (pt-online-schema-change, gh-ost) for MySQL.</li>
+    </ul>
+
+    <h2>Anti-patterns — what NOT to say</h2>
+    <ul>
+      <li>"<code class="inline">SELECT *</code> is fine." Returns more bytes, breaks covering indexes, leaks schema.</li>
+      <li>"Add an index on every column." Indexes cost write amplification + storage; review usage stats.</li>
+      <li>"We'll use eventual consistency." Where? On which reads? Spell it out.</li>
+      <li>Distributed 2PC across services. Almost always reach for Saga + outbox + idempotency.</li>
+      <li>Using a relational DB as a queue without <code class="inline">SKIP LOCKED</code> — head-of-line blocking.</li>
+      <li>JSON blobs as substitutes for proper columns when you'll query / index inside.</li>
+      <li>"Cassandra because scale." Without a query-shape that fits, Cassandra hurts.</li>
+    </ul>
+
+    <h2 data-cram="essential">Senior interviewer follow-ups</h2>
+    <table>
+      <thead><tr><th>Probe</th><th>What they want to hear</th></tr></thead>
+      <tbody>
+        <tr><td>"Why does your composite index help <code class="inline">WHERE a=? AND b=?</code> but not <code class="inline">WHERE b=?</code>?"</td><td>Indexes are sorted by leftmost column first; you need a prefix to use them.</td></tr>
+        <tr><td>"Snapshot isolation vs serializable — what's the gap?"</td><td>Snapshot prevents dirty/unrepeatable/phantom but allows write-skew. Serializable closes write-skew at cost of more aborts.</td></tr>
+        <tr><td>"Saga vs 2PC?"</td><td>2PC blocks on coordinator failure; saga uses compensating transactions and is partition-tolerant — at the cost of "compensable" semantics.</td></tr>
+        <tr><td>"What's a transactional outbox?"</td><td>Write the business state and the event in the same DB transaction; a relay process publishes events from the outbox table.</td></tr>
+        <tr><td>"Postgres queue with SKIP LOCKED?"</td><td><code class="inline">SELECT ... FOR UPDATE SKIP LOCKED LIMIT N</code> — workers grab uncontested rows; no head-of-line blocking.</td></tr>
+        <tr><td>"Hot partition in Cassandra?"</td><td>Bucket the partition key (<code class="inline">user_id, day</code> → <code class="inline">user_id, day, bucket</code>); cap rows per partition.</td></tr>
+        <tr><td>"Online schema change for a billion-row table?"</td><td>Add nullable column → backfill in batches → add NOT NULL with default → switch reads → drop old. Or gh-ost / pt-online-schema-change for MySQL.</td></tr>
+        <tr><td>"How to build read replicas without consistency surprise?"</td><td>Read-your-writes: route writes + immediate reads to leader; eventual reads to replicas. Or session-pinning.</td></tr>
+      </tbody>
+    </table>
+
+    <h2 data-cram="essential">Self-check</h2>
+    <ul class="checklist" data-key="databases-check">
+      <li><input type="checkbox"/><span>I can pick SQL vs NoSQL with reasoned criteria.</span></li>
+      <li><input type="checkbox"/><span>I can explain B-tree vs LSM-tree storage engines.</span></li>
+      <li><input type="checkbox"/><span>I know the 5 ANSI isolation levels and what each prevents.</span></li>
+      <li><input type="checkbox"/><span>I can design a composite index from query patterns.</span></li>
+      <li><input type="checkbox"/><span>I can describe sharding strategies and pick one with justification.</span></li>
+      <li><input type="checkbox"/><span>I know single-leader / multi-leader / leaderless replication trade-offs.</span></li>
+      <li><input type="checkbox"/><span>I can sketch a Saga with compensating actions.</span></li>
+      <li><input type="checkbox"/><span>I can implement transactional outbox.</span></li>
+      <li><input type="checkbox"/><span>I can explain idempotency keys for safe retries.</span></li>
+      <li><input type="checkbox"/><span>I can describe an expand-and-contract schema migration.</span></li>
+      <li><input type="checkbox"/><span>I can describe quorum reads/writes (R+W &gt; N).</span></li>
+      <li><input type="checkbox"/><span>I can use SKIP LOCKED to build a Postgres-backed queue.</span></li>
+    </ul>
+
+    <div class="footer">Next → <a href="caching.html">Caching</a></div>
+  </main>
+</div>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>

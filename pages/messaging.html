@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Messaging & Queues — Go: Zero → Hero</title>
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar-root"></aside>
+  <main class="main">
+    <div class="crumbs"><a href="../index.html">Home</a> / System Design / Messaging</div>
+    <section class="page-header">
+      <div>
+        <h1>Messaging & Event-Driven Systems</h1>
+        <p>The backbone of decoupled, scalable architectures. Get the semantics right and you eliminate entire classes of failure.</p>
+      </div>
+    </section>
+
+    <h2 data-cram="essential">Mental model</h2>
+    <ul>
+      <li><b>Messaging trades immediacy for durability and decoupling</b>. The async path adds latency and an extra failure surface (the broker), in exchange for buffering, fan-out, and replay.</li>
+      <li><b>Pick semantics first</b>: at-most-once / at-least-once / exactly-once. Real "exactly-once" requires <i>idempotent producers</i> + <i>transactional consumers</i> (or outbox + idempotent handler).</li>
+      <li><b>Order is partition-local in Kafka</b>. Partition by the entity that needs ordering (user_id, account_id) — never by random.</li>
+      <li><b>Outbox + idempotent handler is the modern at-least-once recipe</b> — no 2PC, partition-tolerant, simple to operate.</li>
+      <li><b>Always have a DLQ</b> + redrive tooling. Messages that fail repeatedly need human attention, not silent drops.</li>
+    </ul>
+
+    <h2 data-cram="essential">Why messaging?</h2>
+    <ul>
+      <li><b>Decoupling</b> — producers and consumers evolve independently.</li>
+      <li><b>Buffering</b> — absorbs traffic spikes; smooths downstream load.</li>
+      <li><b>Fan-out</b> — one event → many consumers.</li>
+      <li><b>Async workflows</b> — long-running tasks without blocking the request path.</li>
+      <li><b>Audit / replay</b> — event log = source of truth.</li>
+    </ul>
+
+    <h2>Brokers — choose by workload</h2>
+    <table>
+      <thead><tr><th>Broker</th><th>Sweet spot</th></tr></thead>
+      <tbody>
+        <tr><td>Kafka</td><td>High-throughput partitioned log; stream processing; replay</td></tr>
+        <tr><td>RabbitMQ</td><td>Flexible routing (topic/fanout/direct), low-medium throughput</td></tr>
+        <tr><td>SQS / Pub-Sub</td><td>Managed simple queue/topic; standard at-least-once</td></tr>
+        <tr><td>NATS / JetStream</td><td>Low-latency cloud-native messaging, simple ops</td></tr>
+        <tr><td>Redis Streams</td><td>Lightweight queue when Redis is already in stack</td></tr>
+        <tr><td>Kinesis / Pulsar</td><td>Kafka-like managed alternatives; Pulsar separates storage</td></tr>
+      </tbody>
+    </table>
+
+    <h2 data-cram="essential">Delivery semantics</h2>
+    <ul>
+      <li><b>At-most-once</b> — fastest; messages can be lost. Useful for metrics/logs you can sample.</li>
+      <li><b>At-least-once</b> — default in most systems; consumers must be idempotent.</li>
+      <li><b>Exactly-once</b> — needs <em>both</em> idempotent producer and transactional consumer (Kafka transactions, or Outbox + idempotent handler).</li>
+    </ul>
+
+    <h2 data-cram="essential">Kafka mental model</h2>
+    <ul>
+      <li><b>Topic</b> = log of messages, divided into <b>partitions</b>.</li>
+      <li>Order is guaranteed <em>within</em> a partition, never across partitions.</li>
+      <li>Partition key chooses partition (hash). Pick a key that preserves required ordering (e.g. <code class="inline">user_id</code>).</li>
+      <li><b>Consumer group</b> — partitions split across consumers; one partition → one consumer at a time.</li>
+      <li><b>Offsets</b> committed by consumer; replay = reset offset.</li>
+      <li>Retention by time or size; Kafka can be a storage layer for days/weeks.</li>
+    </ul>
+
+    <h2>Patterns</h2>
+
+    <h3>Transactional outbox</h3>
+<pre data-lang="go">// In the same DB transaction that writes business state, also INSERT into outbox table.
+// A relay process polls outbox → publishes to broker → marks rows as sent.
+// This gives at-least-once event delivery without 2PC.
+BEGIN;
+INSERT INTO orders ...;
+INSERT INTO outbox(event_id, payload, status) VALUES (..., 'pending');
+COMMIT;
+</pre>
+
+    <h3>Saga (long-running transaction)</h3>
+    <ul>
+      <li>Choreography — each service reacts to events and emits new ones. Decentralized, hard to debug.</li>
+      <li>Orchestration — central coordinator (Temporal, Cadence) drives steps and compensations. Easier to reason about.</li>
+      <li>Each step has a forward action and a compensating action. State is durable.</li>
+    </ul>
+
+    <h3>CQRS & event sourcing</h3>
+    <ul>
+      <li><b>CQRS</b>: separate write model (commands) and read models (queries). Read models built from events.</li>
+      <li><b>Event sourcing</b>: state = fold(events). Replay to rebuild; snapshots for performance.</li>
+      <li>Powerful but expensive — adopt where audit/replay/temporal queries justify it.</li>
+    </ul>
+
+    <h3>Dead-letter queues (DLQ)</h3>
+    <ul>
+      <li>After N failed retries, ship the message to a DLQ. Alert and inspect — don't silently drop.</li>
+      <li>Provide tooling to redrive from DLQ after fix.</li>
+    </ul>
+
+    <h3>Backpressure</h3>
+    <ul>
+      <li>Bounded queues; pause/slow producers when consumers fall behind.</li>
+      <li>Kafka: consumer lag metric is your primary backpressure signal.</li>
+      <li>RabbitMQ: prefetch count limits unacked messages per consumer.</li>
+    </ul>
+
+    <h2>Idempotency in Go</h2>
+<pre data-lang="go">// Use a deduplication store keyed by message ID with a TTL.
+type Handler struct{ store IdemStore }
+
+func (h *Handler) Handle(ctx context.Context, m Message) error {
+    ok, err := h.store.PutIfAbsent(ctx, m.ID, time.Hour)
+    if err != nil { return err }
+    if !ok    { return nil } // already processed
+    return h.process(ctx, m)
+}
+</pre>
+
+    <h2>Schema management</h2>
+    <ul>
+      <li>Use a schema registry (Confluent, Apicurio) with Avro/Protobuf.</li>
+      <li>Compatibility modes: backward, forward, full. Pick based on rollout order of producers/consumers.</li>
+      <li>Never reuse a field tag in Protobuf. Add new fields, deprecate old.</li>
+    </ul>
+
+    <h2 data-cram="essential">Observability for messaging</h2>
+    <ul>
+      <li>Track lag, throughput, error rate, retry count, DLQ depth.</li>
+      <li>Propagate trace IDs across producer → broker → consumer for end-to-end traces.</li>
+      <li>Measure end-to-end event latency (produce → consume) at p95/p99.</li>
+    </ul>
+
+    <h2>Anti-patterns — what NOT to say</h2>
+    <ul>
+      <li>"RPC then publish" — if the publish fails after the RPC, you've leaked state. Use outbox.</li>
+      <li>"We'll have exactly-once." Without idempotent producer + transactional consumer, you have at-least-once.</li>
+      <li>Random partition keys — kills ordering guarantees.</li>
+      <li>Drinking from the firehose without backpressure — consumer crashes under load.</li>
+      <li>Silent message drops (no DLQ) — bugs hide indefinitely.</li>
+      <li>Reusing Protobuf field tags — instantly breaks compat across deployed versions.</li>
+      <li>Treating Kafka as a database when retention is too short.</li>
+    </ul>
+
+    <h2 data-cram="essential">Senior interviewer follow-ups</h2>
+    <table>
+      <thead><tr><th>Probe</th><th>What they want to hear</th></tr></thead>
+      <tbody>
+        <tr><td>"How do you guarantee at-least-once between two services?"</td><td>Transactional outbox + idempotent consumer with dedup table.</td></tr>
+        <tr><td>"Why not 2PC across DB and broker?"</td><td>Coordinator failure halts the whole system; doesn't survive partitions; high latency.</td></tr>
+        <tr><td>"How does Kafka give exactly-once?"</td><td>Producer with transactional ID + idempotent send; consumer commits offsets and downstream effects in one transaction.</td></tr>
+        <tr><td>"What's the cost of partition rebalancing?"</td><td>Brief consumer downtime; in-progress messages re-delivered on rebalance.</td></tr>
+        <tr><td>"Choreography vs orchestration for sagas?"</td><td>Choreography = decentralized events; orchestration = central state machine (Temporal, Cadence). Orchestration is easier to debug.</td></tr>
+        <tr><td>"How to fan out a single event to 50 consumers?"</td><td>One topic with 50 consumer groups (Kafka), or pub/sub topic with subscriptions.</td></tr>
+        <tr><td>"Schema compat strategies?"</td><td>Backward (consumers upgraded after producers) / forward / full. Pick based on rollout order.</td></tr>
+      </tbody>
+    </table>
+
+    <h2 data-cram="essential">Self-check</h2>
+    <ul class="checklist" data-key="messaging-check">
+      <li><input type="checkbox"/><span>I can pick at-most/at-least/exactly-once with reasoning.</span></li>
+      <li><input type="checkbox"/><span>I can explain Kafka topics, partitions, consumer groups, offsets.</span></li>
+      <li><input type="checkbox"/><span>I can implement transactional outbox.</span></li>
+      <li><input type="checkbox"/><span>I can implement idempotent consumer with dedup store.</span></li>
+      <li><input type="checkbox"/><span>I can sketch a Saga (choreography and orchestration).</span></li>
+      <li><input type="checkbox"/><span>I can explain CQRS and event sourcing trade-offs.</span></li>
+      <li><input type="checkbox"/><span>I always have a DLQ + redrive tooling.</span></li>
+      <li><input type="checkbox"/><span>I can apply backpressure (bounded queue, lag metric, consumer prefetch).</span></li>
+      <li><input type="checkbox"/><span>I know schema compat modes (backward / forward / full).</span></li>
+      <li><input type="checkbox"/><span>I can pick a partition key that preserves required ordering.</span></li>
+    </ul>
+
+    <div class="footer">Next → <a href="microservices.html">Microservices in Go</a></div>
+  </main>
+</div>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>

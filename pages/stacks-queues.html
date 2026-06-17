@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stacks & Queues — Go: Zero → Hero</title>
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar-root"></aside>
+  <main class="main">
+    <div class="crumbs"><a href="../index.html">Home</a> / Patterns / Stacks & Queues</div>
+    <section class="page-header">
+      <div>
+        <h1>Stacks & Queues</h1>
+        <p>Use a slice for both. The interesting stuff is <b>monotonic stacks</b> and <b>monotonic deques</b> — they collapse O(n²) into O(n).</p>
+      </div>
+    </section>
+
+    <h2 data-cram="essential">Mental model</h2>
+    <ul>
+      <li><b>Stack = "depend on the most recent thing"</b>: parens, recursion-on-iterative, expression eval, undo. LIFO.</li>
+      <li><b>Queue = "process in order of arrival"</b>: BFS, schedulers, level-order. FIFO.</li>
+      <li><b>Monotonic stack/deque = "next greater / smaller / max-in-window"</b>. They are the unlock for many "next-X-element" problems, collapsing O(n²) brute force to O(n).</li>
+      <li><b>Two-stack queue / two-queue stack</b>: classic interview puzzle that's also a real technique for amortized O(1) ops with simple data structures.</li>
+      <li><b>Decode-string, basic-calculator, asteroid-collision</b>: all stack problems wearing different costumes.</li>
+    </ul>
+
+    <h2 data-cram="essential">Idiomatic Go containers</h2>
+<pre data-lang="go">// Stack
+var st []int
+st = append(st, x)                   // push
+top := st[len(st)-1]                 // peek
+st = st[:len(st)-1]                  // pop
+
+// Queue (FIFO)
+var q []int
+q = append(q, x)                     // enqueue
+head := q[0]; q = q[1:]              // dequeue  (O(1) amortized for small n)
+
+// For large queues prefer container/list or a ring buffer to avoid retaining memory.
+</pre>
+
+    <h2>Valid parentheses</h2>
+<pre data-lang="go">func isValid(s string) bool {
+    pair := map[byte]byte{')': '(', ']': '[', '}': '{'}
+    var st []byte
+    for i := 0; i &lt; len(s); i++ {
+        c := s[i]
+        if c == '(' || c == '[' || c == '{' { st = append(st, c); continue }
+        if len(st) == 0 || st[len(st)-1] != pair[c] { return false }
+        st = st[:len(st)-1]
+    }
+    return len(st) == 0
+}
+</pre>
+
+    <h2 data-cram="essential">Monotonic stack — Next Greater Element</h2>
+<pre data-lang="go">func nextGreater(a []int) []int {
+    res := make([]int, len(a))
+    for i := range res { res[i] = -1 }
+    var st []int                     // indices, values decreasing
+    for i, v := range a {
+        for len(st) &gt; 0 &amp;&amp; a[st[len(st)-1]] &lt; v {
+            res[st[len(st)-1]] = v
+            st = st[:len(st)-1]
+        }
+        st = append(st, i)
+    }
+    return res
+}
+</pre>
+    <blockquote>Mnemonic: <b>decreasing stack</b> → next greater. <b>Increasing stack</b> → next smaller. Push indices; pop while the new element breaks monotonicity.</blockquote>
+
+    <h2>Largest Rectangle in Histogram</h2>
+<pre data-lang="go">func largestRectangleArea(h []int) int {
+    h = append(h, 0)                 // sentinel flushes the stack
+    var st []int; best := 0
+    for i, v := range h {
+        for len(st) &gt; 0 &amp;&amp; h[st[len(st)-1]] &gt; v {
+            top := st[len(st)-1]; st = st[:len(st)-1]
+            width := i
+            if len(st) &gt; 0 { width = i - st[len(st)-1] - 1 }
+            if a := h[top] * width; a &gt; best { best = a }
+        }
+        st = append(st, i)
+    }
+    return best
+}
+</pre>
+
+    <h2>Sliding-window maximum (monotonic deque)</h2>
+<pre data-lang="go">func maxSlidingWindow(a []int, k int) []int {
+    var dq []int
+    res := make([]int, 0, len(a)-k+1)
+    for i, v := range a {
+        for len(dq) &gt; 0 &amp;&amp; a[dq[len(dq)-1]] &lt; v { dq = dq[:len(dq)-1] }
+        dq = append(dq, i)
+        if dq[0] &lt;= i-k { dq = dq[1:] }
+        if i &gt;= k-1 { res = append(res, a[dq[0]]) }
+    }
+    return res
+}
+</pre>
+
+    <h2>Queue using two stacks</h2>
+<pre data-lang="go">type MyQueue struct{ in, out []int }
+func (q *MyQueue) Push(x int) { q.in = append(q.in, x) }
+func (q *MyQueue) Pop() int {
+    q.shift()
+    v := q.out[len(q.out)-1]; q.out = q.out[:len(q.out)-1]; return v
+}
+func (q *MyQueue) Peek() int { q.shift(); return q.out[len(q.out)-1] }
+func (q *MyQueue) Empty() bool { return len(q.in) == 0 &amp;&amp; len(q.out) == 0 }
+func (q *MyQueue) shift() {
+    if len(q.out) == 0 {
+        for i := len(q.in) - 1; i &gt;= 0; i-- { q.out = append(q.out, q.in[i]) }
+        q.in = q.in[:0]
+    }
+}
+</pre>
+
+    <h2>Min stack (constant extra per push)</h2>
+<pre data-lang="go">type MinStack struct{ data []int; mins []int }
+func (s *MinStack) Push(x int) {
+    s.data = append(s.data, x)
+    m := x
+    if len(s.mins) &gt; 0 &amp;&amp; s.mins[len(s.mins)-1] &lt; m { m = s.mins[len(s.mins)-1] }
+    s.mins = append(s.mins, m)
+}
+func (s *MinStack) Pop()    { s.data = s.data[:len(s.data)-1]; s.mins = s.mins[:len(s.mins)-1] }
+func (s *MinStack) Top() int { return s.data[len(s.data)-1] }
+func (s *MinStack) Min() int { return s.mins[len(s.mins)-1] }
+</pre>
+
+    <h2 data-cram="essential">Classic problems</h2>
+    <table>
+      <thead><tr><th>Problem</th><th>Pattern</th><th>Time</th></tr></thead>
+      <tbody>
+        <tr><td>Valid Parentheses</td><td>Stack of expected closers</td><td>O(n)</td></tr>
+        <tr><td>Min Add to Make Valid / Min Remove</td><td>Stack of indices</td><td>O(n)</td></tr>
+        <tr><td>Longest Valid Parentheses</td><td>Stack of indices with sentinel</td><td>O(n)</td></tr>
+        <tr><td>Daily Temperatures</td><td>Decreasing monotonic stack</td><td>O(n)</td></tr>
+        <tr><td>Next Greater Element I / II / III</td><td>Decreasing monotonic stack (II = circular)</td><td>O(n)</td></tr>
+        <tr><td>Largest Rectangle in Histogram</td><td>Increasing stack with sentinel</td><td>O(n)</td></tr>
+        <tr><td>Maximal Rectangle</td><td>Per-row histogram + above</td><td>O(mn)</td></tr>
+        <tr><td>Trapping Rain Water (stack)</td><td>Decreasing stack of indices</td><td>O(n)</td></tr>
+        <tr><td>Asteroid Collision</td><td>Stack with collision rules</td><td>O(n)</td></tr>
+        <tr><td>Decode String "3[a2[c]]"</td><td>Stack of (count, prefix)</td><td>O(n)</td></tr>
+        <tr><td>Basic Calculator I / II / III</td><td>Two stacks (nums, ops)</td><td>O(n)</td></tr>
+        <tr><td>Evaluate Reverse Polish Notation</td><td>Stack of operands</td><td>O(n)</td></tr>
+        <tr><td>Simplify Path</td><td>Split on "/", stack of dirs</td><td>O(n)</td></tr>
+        <tr><td>Sliding Window Maximum</td><td>Monotonic deque</td><td>O(n)</td></tr>
+        <tr><td>Shortest Subarray Sum &gt;= K (with neg)</td><td>Monotonic deque on prefix sums</td><td>O(n)</td></tr>
+        <tr><td>Implement Queue using Stacks / Stack using Queues</td><td>Two-of-the-other</td><td>amortized O(1)</td></tr>
+        <tr><td>Min Stack · Max Stack</td><td>Auxiliary stack of running min/max</td><td>O(1) per op</td></tr>
+        <tr><td>Remove K Digits / 132 Pattern</td><td>Monotonic stack</td><td>O(n)</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Anti-patterns — what NOT to say</h2>
+    <ul>
+      <li>"I'll use <code class="inline">container/list</code> for a stack." A slice is faster, simpler, and idiomatic.</li>
+      <li>Re-scanning the array to find next greater. That's O(n²) — use a monotonic stack.</li>
+      <li>Building an "array queue" by repeatedly slicing <code class="inline">q = q[1:]</code> on huge data. Eventually the underlying array isn't reclaimed; use a head index or a ring buffer.</li>
+      <li>Treating "balanced parens" with counters when there are multiple bracket types — only stack handles nesting correctly.</li>
+      <li>Forgetting the sentinel zero at the end of the histogram for Largest Rectangle.</li>
+    </ul>
+
+    <h2 data-cram="essential">Senior interviewer follow-ups</h2>
+    <table>
+      <thead><tr><th>Probe</th><th>What they want to hear</th></tr></thead>
+      <tbody>
+        <tr><td>"Why is monotonic stack amortized O(n)?"</td><td>Each index pushed once, popped at most once.</td></tr>
+        <tr><td>"Decreasing or increasing — which gives next greater?"</td><td>Decreasing stack: when a bigger element arrives, popped items get their next-greater answered.</td></tr>
+        <tr><td>"Implement a queue using two stacks — pop cost?"</td><td>Amortized O(1); worst case O(n) when out-stack drains in.</td></tr>
+        <tr><td>"How do you handle Basic Calculator with parens and *,/?"</td><td>Two stacks (nums, ops), or recursive descent: paren = recurse, then evaluate left-to-right respecting precedence.</td></tr>
+        <tr><td>"Streaming median?"</td><td>Two heaps (max-heap of lower half, min-heap of upper half) — not stack, but worth mentioning.</td></tr>
+        <tr><td>"Sliding-window minimum with negatives?"</td><td>Same monotonic deque, increasing instead of decreasing.</td></tr>
+      </tbody>
+    </table>
+
+    <h2 data-cram="essential">Self-check</h2>
+    <ul class="checklist" data-key="stacks-queues-check">
+      <li><input type="checkbox"/><span>I can write Valid Parentheses with a stack.</span></li>
+      <li><input type="checkbox"/><span>I can write Next Greater Element using a monotonic stack.</span></li>
+      <li><input type="checkbox"/><span>I can write Largest Rectangle in Histogram (with sentinel).</span></li>
+      <li><input type="checkbox"/><span>I can write Sliding Window Maximum with a monotonic deque.</span></li>
+      <li><input type="checkbox"/><span>I can implement queue from two stacks (and explain amortization).</span></li>
+      <li><input type="checkbox"/><span>I can implement Min Stack with O(1) min in O(1) extra per push.</span></li>
+      <li><input type="checkbox"/><span>I can solve Decode String with a stack of (count, prefix).</span></li>
+      <li><input type="checkbox"/><span>I can solve Basic Calculator (with +, -, *, /, parens).</span></li>
+      <li><input type="checkbox"/><span>I know the difference between increasing/decreasing monotonic and which to use.</span></li>
+      <li><input type="checkbox"/><span>I can solve Asteroid Collision and explain the loop invariant.</span></li>
+    </ul>
+
+    <div class="footer">Next → <a href="hashing.html">Hashing</a></div>
+  </main>
+</div>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>

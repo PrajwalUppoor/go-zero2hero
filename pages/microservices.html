@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Microservices in Go — Go: Zero → Hero</title>
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar-root"></aside>
+  <main class="main">
+    <div class="crumbs"><a href="../index.html">Home</a> / System Design / Microservices in Go</div>
+    <section class="page-header">
+      <div>
+        <h1>Microservices in Go</h1>
+        <p>The senior-backend playbook: how to ship Go services that are fast, observable, resilient, and that fit cleanly into a distributed system.</p>
+      </div>
+    </section>
+
+    <h2 data-cram="essential">Mental model</h2>
+    <ul>
+      <li><b>Default to a modular monolith.</b> Microservices add operational burden you must justify with team scale, deploy cadence, or hard fault isolation.</li>
+      <li><b>Three constants in every service</b>: clear bounded context, robust observability (metrics + logs + traces), and a defined SLO with error budget.</li>
+      <li><b>Layered Go layout</b>: <code class="inline">cmd/ → internal/&lt;domain&gt;/{transport, service, repository, storage}</code>. Domain depends on nothing.</li>
+      <li><b>The 12 cross-cutting concerns</b> are non-negotiable: config, log, metrics, trace, health, shutdown, timeouts, idempotency, authn/z, rate-limit, circuit-break, schema evolution.</li>
+      <li><b>Choose communication style</b> per case: gRPC for east-west, REST for public, async events for decoupling, never RPC-then-publish.</li>
+    </ul>
+
+    <h2 data-cram="essential">When microservices are the right answer</h2>
+    <ul>
+      <li><b>Independent deploys</b> — different teams ship at different cadences.</li>
+      <li><b>Different scaling profiles</b> — one path is CPU-bound, another is I/O-bound.</li>
+      <li><b>Fault isolation</b> — a slow recommendation service shouldn't take down checkout.</li>
+      <li><b>Polyglot persistence</b> — one component needs Postgres, another Cassandra.</li>
+    </ul>
+    <blockquote class="warn">If you don't have multiple teams, multiple deploy cadences, or hard isolation needs, a well-structured monolith ("modular monolith") is almost always the better choice. Microservices trade simplicity for organizational scalability — pay the cost only when you reap the benefit.</blockquote>
+
+    <h2>Service anatomy — the layered Go layout</h2>
+<pre data-lang="go">// /cmd/orderd/main.go        ← thin entrypoint (flags, config, wiring)
+// /internal/order/...         ← business logic (no HTTP, no SQL leaks)
+//     domain.go               ← entities, value objects, errors
+//     service.go              ← use cases (Place, Cancel, Get)
+//     repository.go           ← interface (Save, FindByID)
+// /internal/order/transport/  ← HTTP/gRPC handlers, DTOs
+// /internal/order/storage/    ← Postgres impl of repository
+// /internal/platform/...      ← logger, metrics, tracing, db pool, kafka
+// /api/openapi.yaml or *.proto
+</pre>
+    <ul>
+      <li><b>Dependency rule</b>: transport → service → repository. Domain depends on nothing.</li>
+      <li><b>Interfaces live where they are used</b>, not where they are implemented.</li>
+      <li><b>No global state</b>. Pass dependencies explicitly; use a small wiring function in <code class="inline">main</code>.</li>
+    </ul>
+
+    <h2 data-cram="essential">Production-ready HTTP server in Go</h2>
+<pre data-lang="go">func run(ctx context.Context) error {
+    cfg := loadConfig()
+    log := newLogger(cfg)
+
+    db, err := pgxpool.NewWithConfig(ctx, mustParse(cfg.DSN))
+    if err != nil { return err }
+    defer db.Close()
+
+    svc := order.NewService(order.NewPGRepo(db), kafkaPub)
+    h   := transport.NewHTTP(svc, log)
+
+    srv := &amp;http.Server{
+        Addr:              cfg.Addr,
+        Handler:           h,
+        ReadHeaderTimeout: 5 * time.Second,
+        ReadTimeout:       15 * time.Second,
+        WriteTimeout:      30 * time.Second,
+        IdleTimeout:       60 * time.Second,
+        MaxHeaderBytes:    1 &lt;&lt; 20,
+    }
+
+    g, ctx := errgroup.WithContext(ctx)
+    g.Go(func() error { return srv.ListenAndServe() })
+    g.Go(func() error {
+        &lt;-ctx.Done()
+        sd, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+        defer cancel()
+        return srv.Shutdown(sd)
+    })
+    return g.Wait()
+}
+</pre>
+    <blockquote class="ok"><b>Why these timeouts matter:</b> the default <code class="inline">http.Server</code> has none. A single misbehaving client can hold a goroutine forever, eventually starving the process. Always set them.</blockquote>
+
+    <h2>HTTP vs gRPC — what to use when</h2>
+    <table>
+      <thead><tr><th>Choose</th><th>When</th></tr></thead>
+      <tbody>
+        <tr><td>REST + JSON</td><td>Public API, browser clients, debug-by-curl, polyglot consumers.</td></tr>
+        <tr><td>gRPC + Protobuf</td><td>Internal east-west traffic, low latency, streaming, strong contracts, polyglot servers.</td></tr>
+        <tr><td>GraphQL</td><td>Frontend wants flexible composition over many backends; one team owns the schema.</td></tr>
+        <tr><td>Async (Kafka, NATS)</td><td>Decoupling, fan-out, durable events, long-running workflows.</td></tr>
+      </tbody>
+    </table>
+
+    <h2 data-cram="essential">The 12 cross-cutting concerns every Go service must handle</h2>
+    <ol>
+      <li><b>Configuration</b> — env vars + flags, validated on boot, fail fast.</li>
+      <li><b>Logging</b> — structured (slog/zap), one log per request with trace ID.</li>
+      <li><b>Metrics</b> — Prometheus: RED (Rate, Errors, Duration) + USE (Utilization, Saturation, Errors).</li>
+      <li><b>Tracing</b> — OpenTelemetry, propagate W3C traceparent header, span per outbound call.</li>
+      <li><b>Health checks</b> — <code class="inline">/healthz</code> liveness, <code class="inline">/readyz</code> readiness (deps reachable).</li>
+      <li><b>Graceful shutdown</b> — drain in-flight, close DB pools, flush traces, exit 0.</li>
+      <li><b>Timeouts &amp; retries</b> — context-everywhere, exponential backoff with jitter.</li>
+      <li><b>Idempotency</b> — Idempotency-Key header on writes, dedup store with TTL.</li>
+      <li><b>Authn/z</b> — JWT/OIDC at edge, mTLS east-west, never roll your own crypto.</li>
+      <li><b>Rate limiting</b> — per-tenant token bucket; protect downstreams.</li>
+      <li><b>Circuit breaking &amp; bulkheads</b> — fail fast on failing deps, isolate resource pools.</li>
+      <li><b>Schema evolution</b> — Protobuf with backward-compatible fields; never reuse a tag.</li>
+    </ol>
+
+    <h2>Resilience patterns — Go snippets</h2>
+
+    <h3>Timeout + retry with backoff</h3>
+<pre data-lang="go">func callWithRetry(ctx context.Context, do func(context.Context) error) error {
+    var err error
+    for attempt := 0; attempt &lt; 5; attempt++ {
+        cctx, cancel := context.WithTimeout(ctx, 800*time.Millisecond)
+        err = do(cctx)
+        cancel()
+        if err == nil || !isRetriable(err) { return err }
+        // Exponential backoff with full jitter.
+        sleep := time.Duration(rand.Int63n(int64(time.Second &lt;&lt; attempt)))
+        select {
+        case &lt;-time.After(sleep):
+        case &lt;-ctx.Done(): return ctx.Err()
+        }
+    }
+    return err
+}
+</pre>
+
+    <h3>Circuit breaker (sketch)</h3>
+<pre data-lang="go">// State: closed (allow) → open (deny) → half-open (probe). Switch on rolling
+// failure ratio. Use sony/gobreaker or implement with a sliding window of
+// outcomes guarded by a mutex. Open state should fail fast in &lt; 1 ms.
+</pre>
+
+    <h3>Bulkhead via bounded semaphore</h3>
+<pre data-lang="go">sem := make(chan struct{}, 32) // at most 32 concurrent calls to dep X
+func call(ctx context.Context) error {
+    select {
+    case sem &lt;- struct{}{}:
+        defer func() { &lt;-sem }()
+    case &lt;-ctx.Done():
+        return ctx.Err()
+    }
+    return doExpensiveCall(ctx)
+}
+</pre>
+
+    <h3>Singleflight (cache stampede)</h3>
+<pre data-lang="go">var g singleflight.Group
+v, err, _ := g.Do("user:"+id, func() (any, error) { return loadUser(ctx, id) })
+</pre>
+
+    <h2>Inter-service communication patterns</h2>
+    <ul>
+      <li><b>Request/response</b> — gRPC or REST. Synchronous; couples availability.</li>
+      <li><b>Async events</b> — Kafka/NATS. Decouples, but adds eventual consistency.</li>
+      <li><b>Saga</b> — sequence of local txns + compensations for distributed workflows.</li>
+      <li><b>Outbox</b> — atomic DB write + event publish; relay polls outbox table.</li>
+      <li><b>BFF (backend for frontend)</b> — per-client aggregation; avoids chatty mobile/web calls.</li>
+      <li><b>API gateway</b> — auth, rate-limit, routing, request shaping at the edge.</li>
+    </ul>
+
+    <h2>Service mesh vs library</h2>
+    <table>
+      <thead><tr><th>Concern</th><th>Library (Go)</th><th>Mesh (Istio/Linkerd)</th></tr></thead>
+      <tbody>
+        <tr><td>mTLS</td><td>Hand-rolled, per-service</td><td>Automatic, identity-based</td></tr>
+        <tr><td>Retries / timeouts</td><td>In-process, precise</td><td>Sidecar policy, language-agnostic</td></tr>
+        <tr><td>Observability</td><td>Direct OTel SDK</td><td>L7 metrics for free</td></tr>
+        <tr><td>Cost</td><td>Code/dep maintenance</td><td>Sidecar CPU/RAM, ops complexity</td></tr>
+      </tbody>
+    </table>
+    <blockquote>For a small fleet, Go libraries are simpler and faster. Adopt a mesh when you have many languages, security/compliance demands, or fleet-wide policy needs.</blockquote>
+
+    <h2>Configuration &amp; secrets</h2>
+    <ul>
+      <li><b>12-factor config</b> — env vars; never check secrets into git.</li>
+      <li><b>Hot-reload sparingly</b> — most things should require a restart for predictability.</li>
+      <li><b>Secrets</b> — Vault, AWS Secrets Manager, Kubernetes Secrets + KMS.</li>
+      <li><b>Feature flags</b> — separate from config; fast rollout/rollback without deploy.</li>
+    </ul>
+
+    <h2>Testing strategy (the Go pyramid)</h2>
+    <ul>
+      <li><b>Unit</b> — pure functions, table-driven; mock external deps via interfaces.</li>
+      <li><b>Integration</b> — real DB/broker via <code class="inline">testcontainers-go</code>; one happy path per repo.</li>
+      <li><b>Contract</b> — gRPC/Pact tests so producer/consumer don't drift.</li>
+      <li><b>End-to-end</b> — few; smoke test critical paths in staging.</li>
+      <li><b>Race &amp; benchmarks</b> — <code class="inline">go test -race</code> in CI; <code class="inline">go test -bench</code> for hot paths.</li>
+    </ul>
+
+    <h2>Deployment &amp; operations</h2>
+    <ul>
+      <li><b>Containers</b> — multi-stage Dockerfile, distroless or scratch base, non-root user, static binary.</li>
+      <li><b>Kubernetes</b> — readiness probe, PodDisruptionBudget, HPA on RPS or CPU, requests/limits set.</li>
+      <li><b>Rollouts</b> — blue/green or canary with metric gates (error rate, p99 latency).</li>
+      <li><b>SLOs</b> — define availability/latency budgets; alert on burn rate, not raw thresholds.</li>
+      <li><b>Runbooks</b> — every alert links to a doc with diagnosis steps.</li>
+    </ul>
+
+    <h2 data-cram="essential">Common Go pitfalls in production services</h2>
+    <ul>
+      <li><b>Forgetting <code class="inline">defer rows.Close()</code></b> — leaks DB connections under load.</li>
+      <li><b>Unbounded goroutines per request</b> — backpressure with worker pools or semaphores.</li>
+      <li><b>Blocking on channels without ctx</b> — every blocking op must select on <code class="inline">ctx.Done()</code>.</li>
+      <li><b>Shared <code class="inline">http.Client</code> with no timeout</b> — set <code class="inline">Timeout</code> AND tune <code class="inline">Transport</code> (idle conns, max per host).</li>
+      <li><b>Logging in hot paths at Info level</b> — burns CPU and disk; gate behind a level check.</li>
+      <li><b>Returning maps as DTOs</b> — define explicit structs; you'll thank yourself later.</li>
+      <li><b>Panicking in handlers</b> — install a recovery middleware that logs + 500.</li>
+    </ul>
+
+    <h2 data-cram="essential">Senior-bar follow-ups interviewers ask</h2>
+    <ul>
+      <li><b>"How do you roll out a breaking schema change across services?"</b> — expand-contract: add new field/route, dual-write, migrate consumers, remove old.</li>
+      <li><b>"How do you debug a tail-latency spike?"</b> — RED dashboards → traces of slow requests → flamegraph from <code class="inline">pprof</code> → fix or shed.</li>
+      <li><b>"How do you handle a flapping dependency?"</b> — circuit breaker, fallback (cached/default), alert, talk to the owning team.</li>
+      <li><b>"How do you guarantee at-least-once between two services?"</b> — outbox + idempotent consumer, never RPC-then-publish.</li>
+      <li><b>"How do you make a Go service start cold &lt; 1 s?"</b> — small static binary, lazy-init non-critical deps, don't preload caches at boot.</li>
+    </ul>
+
+    <h2 data-cram="essential">Self-check</h2>
+    <ul class="checklist" data-key="microservices-check">
+      <li><input type="checkbox"/><span>I can describe when microservices are <i>not</i> the answer.</span></li>
+      <li><input type="checkbox"/><span>I can sketch the layered Go service layout from memory.</span></li>
+      <li><input type="checkbox"/><span>I can write a production HTTP server with all timeouts + graceful shutdown.</span></li>
+      <li><input type="checkbox"/><span>I can name and address all 12 cross-cutting concerns.</span></li>
+      <li><input type="checkbox"/><span>I can pick HTTP/gRPC/async per use case.</span></li>
+      <li><input type="checkbox"/><span>I can implement timeout + retry + circuit breaker + bulkhead in Go.</span></li>
+      <li><input type="checkbox"/><span>I know when service mesh is worth the cost.</span></li>
+      <li><input type="checkbox"/><span>I can explain my testing strategy across the pyramid.</span></li>
+      <li><input type="checkbox"/><span>I can avoid every common Go production pitfall on this page.</span></li>
+      <li><input type="checkbox"/><span>I can debug a tail-latency spike (RED → trace → pprof).</span></li>
+    </ul>
+
+    <div class="footer">Next → <a href="system-design-cases.html">Case studies (URL shortener → Twitter)</a></div>
+  </main>
+</div>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LeetCode Tricks — Go: Zero → Hero</title>
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar-root"></aside>
+  <main class="main">
+    <div class="crumbs"><a href="../index.html">Home</a> / LeetCode Tricks</div>
+    <section class="page-header">
+      <div>
+        <h1>The Complete LeetCode Trick Book</h1>
+        <p>Every battle-tested heuristic, pattern signal, and code micro-trick that turns a 45-minute struggle into a 10-minute solve. Skim before any interview.</p>
+      </div>
+    </section>
+
+    <h2 data-cram="essential">0. The 5-step universal solving framework</h2>
+    <ol>
+      <li><b>Clarify</b> — inputs, outputs, ranges, duplicates, negatives, empty, sortedness, in-place allowed?</li>
+      <li><b>Examples</b> — 1 normal + 1 edge (empty/1-el/all-equal/sorted-reverse).</li>
+      <li><b>Brute force</b> — say it out loud with complexity. Often unlocks the optimization.</li>
+      <li><b>Optimize</b> — apply a pattern (table below). State new complexity <em>before</em> coding.</li>
+      <li><b>Code → trace → test edges</b>.</li>
+    </ol>
+
+    <h2 data-cram="essential">1. Pattern-recognition cheatsheet (the “signal → tool” table)</h2>
+    <table>
+      <thead><tr><th>If the problem says / looks like…</th><th>Reach for</th></tr></thead>
+      <tbody>
+        <tr><td>Sorted array, find pair / partition</td><td>Two pointers (opposite ends)</td></tr>
+        <tr><td>Find/longest/shortest contiguous subarray/substring with constraint</td><td>Sliding window</td></tr>
+        <tr><td>Subarray sum equals K (any sign)</td><td>Prefix sum + hashmap of counts</td></tr>
+        <tr><td>Range sum / range XOR (immutable)</td><td>Prefix sum / prefix XOR</td></tr>
+        <tr><td>Range sum (mutable, point updates)</td><td>Fenwick tree (BIT) / segment tree</td></tr>
+        <tr><td>Range min/max query (immutable)</td><td>Sparse table — O(1) per query</td></tr>
+        <tr><td>“Next greater/smaller element”</td><td>Monotonic stack</td></tr>
+        <tr><td>Max/min in a sliding window</td><td>Monotonic deque</td></tr>
+        <tr><td>k-th smallest / largest, streaming</td><td>Min/max-heap of size k</td></tr>
+        <tr><td>k-th smallest, one-shot, in-place</td><td>Quickselect</td></tr>
+        <tr><td>Top-K frequent</td><td>Bucket sort by frequency (O(n)) or heap (O(n log k))</td></tr>
+        <tr><td>Detect cycle / find middle of linked list</td><td>Fast & slow pointers (Floyd)</td></tr>
+        <tr><td>Reverse / re-order linked list</td><td>Iterative 3-pointer reverse</td></tr>
+        <tr><td>“Find duplicates / missing in [1..n]”</td><td>Cyclic sort OR index marking (negate)</td></tr>
+        <tr><td>Interval merge / insert / room scheduling</td><td>Sort by start; sweep line</td></tr>
+        <tr><td>Shortest path on unweighted graph</td><td>BFS</td></tr>
+        <tr><td>Shortest path, non-negative weights</td><td>Dijkstra (heap)</td></tr>
+        <tr><td>Shortest path, negative edges (no neg cycle)</td><td>Bellman-Ford / SPFA</td></tr>
+        <tr><td>All-pairs shortest path, n ≤ 400</td><td>Floyd-Warshall</td></tr>
+        <tr><td>Order with dependencies / build order / course schedule</td><td>Topological sort (Kahn / DFS)</td></tr>
+        <tr><td>Group / merge / “are X and Y connected”</td><td>Union-Find</td></tr>
+        <tr><td>Prefix lookup / autocomplete / word dictionary</td><td>Trie</td></tr>
+        <tr><td>“Count ways” / “min cost to reach state”</td><td>DP</td></tr>
+        <tr><td>“Smallest x such that P(x)” / capacity-fits questions</td><td>Binary search on answer</td></tr>
+        <tr><td>Anything starting “generate all / enumerate every…”</td><td>Backtracking</td></tr>
+        <tr><td>“Choose subset / order” with tiny n (≤ 20)</td><td>Bitmask DP</td></tr>
+        <tr><td>“Local choice optimal globally” + sortable by 1 key</td><td>Greedy (prove with exchange argument)</td></tr>
+        <tr><td>Two strings; transform/match</td><td>2D DP (i, j)</td></tr>
+        <tr><td>Palindrome counting/longest</td><td>Expand-around-center / Manacher / DP[i][j]</td></tr>
+        <tr><td>“At most K” harder than “exactly K” → solve “≤ K” – “≤ K-1”</td><td>Sliding window trick</td></tr>
+      </tbody>
+    </table>
+
+    <h2 data-cram="essential">2. Constraints → algorithm radar (the n ≤ ? table)</h2>
+    <table>
+      <thead><tr><th>n (input size)</th><th>Allowed complexity</th><th>Typical techniques</th></tr></thead>
+      <tbody>
+        <tr><td>n ≤ 10</td><td>O(n!) / O(2ⁿ · n)</td><td>Brute force, permutations, backtracking</td></tr>
+        <tr><td>n ≤ 20</td><td>O(2ⁿ · n)</td><td>Bitmask DP, meet-in-the-middle</td></tr>
+        <tr><td>n ≤ 100</td><td>O(n³)</td><td>Floyd-Warshall, 3-nested DP</td></tr>
+        <tr><td>n ≤ 1,000</td><td>O(n²)</td><td>Edit distance, LCS, 2D DP, all-pairs BFS</td></tr>
+        <tr><td>n ≤ 10⁵</td><td>O(n log n)</td><td>Sorting, heap, segment tree, binary search</td></tr>
+        <tr><td>n ≤ 10⁶</td><td>O(n)</td><td>Linear scan, hashing, two-pointer, BFS/DFS</td></tr>
+        <tr><td>n ≥ 10⁸</td><td>O(log n) or O(1)</td><td>Math, closed-form, modular exponentiation</td></tr>
+      </tbody>
+    </table>
+    <blockquote>Reverse engineer the algorithm from the constraints — interviewers literally pick n to leak the expected complexity.</blockquote>
+
+    <h2>3. Universal code micro-tricks (Go)</h2>
+
+    <h3>Index arithmetic</h3>
+<pre data-lang="go">// Safe mid (no overflow):
+m := lo + (hi-lo)/2
+
+// 2D ↔ 1D index conversion:
+idx := r*cols + c
+r, c := idx/cols, idx%cols
+
+// Iterate 4 / 8 neighbors:
+dr := []int{-1, 1, 0, 0}
+dc := []int{0, 0, -1, 1}
+for k := 0; k &lt; 4; k++ {
+    nr, nc := r+dr[k], c+dc[k]
+    if nr &gt;= 0 &amp;&amp; nr &lt; R &amp;&amp; nc &gt;= 0 &amp;&amp; nc &lt; C { /* ... */ }
+}
+
+// Diagonals on a grid: i+j is constant on / diagonals; i-j on \ diagonals.
+</pre>
+
+    <h3>Counters without map (ASCII / lowercase)</h3>
+<pre data-lang="go">var c [26]int                  // for 'a'..'z'  → faster than map[byte]int
+c[s[i]-'a']++
+// Compare anagram signatures with == on fixed-size arrays — no DeepEqual.
+</pre>
+
+    <h3>“Mark visited” without extra space</h3>
+<pre data-lang="go">// In a positive-int array, negate to mark "seen".
+for _, x := range a {
+    i := abs(x) - 1
+    if a[i] &gt; 0 { a[i] = -a[i] }   // i has been seen
+}
+// For grids, overwrite with a sentinel char ('#') instead of a visited[][] grid.
+</pre>
+
+    <h3>Sentinel & dummy nodes</h3>
+<pre data-lang="go">// Linked-list problems: always start with a dummy head.
+dummy := &amp;ListNode{Next: head}
+// Stack problems: push a sentinel to flush the monotonic stack at the end.
+heights = append(heights, 0)
+</pre>
+
+    <h3>Sort by multi-key</h3>
+<pre data-lang="go">sort.Slice(items, func(i, j int) bool {
+    if items[i].Key != items[j].Key { return items[i].Key &lt; items[j].Key }
+    return items[i].Val &gt; items[j].Val      // tie-break
+})
+</pre>
+
+    <h3>Min/max for ints (Go 1.21+)</h3>
+<pre data-lang="go">x := min(a, b)
+y := max(a, b, c)
+// Pre-1.21: write tiny helpers or use a generic Ordered constraint.
+</pre>
+
+    <h3>Heap — copy this once and re-use</h3>
+<pre data-lang="go">type IntHeap []int
+func (h IntHeap) Len() int            { return len(h) }
+func (h IntHeap) Less(i, j int) bool  { return h[i] &lt; h[j] }   // min-heap
+func (h IntHeap) Swap(i, j int)       { h[i], h[j] = h[j], h[i] }
+func (h *IntHeap) Push(x any)         { *h = append(*h, x.(int)) }
+func (h *IntHeap) Pop() any           { old := *h; n := len(old); x := old[n-1]; *h = old[:n-1]; return x }
+// Use:  h := &amp;IntHeap{}; heap.Init(h); heap.Push(h, 5); heap.Pop(h).(int)
+</pre>
+
+    <h2>4. Pattern-specific tricks</h2>
+
+    <h3>Arrays / prefix</h3>
+    <ul>
+      <li><b>“Subarray sum equals K”</b> → <code class="inline">map[prefixSum]count</code>; at index i, answer += map[prefix - K].</li>
+      <li><b>Product except self</b> → two passes: left-product then right-product, both into the same output array.</li>
+      <li><b>Difference array</b> for range updates + 1 final pass: add v at l, subtract v at r+1, then prefix-sum.</li>
+      <li><b>Boyer–Moore majority</b> — candidate + count. O(n) / O(1).</li>
+      <li><b>2D prefix sum</b>: <code class="inline">P[i][j] = a[i-1][j-1] + P[i-1][j] + P[i][j-1] - P[i-1][j-1]</code>.</li>
+    </ul>
+
+    <h3>Two pointers</h3>
+    <ul>
+      <li>“Squares of sorted array” → fill the result from the back, choosing the larger of |a[l]| and |a[r]|.</li>
+      <li>For k-Sum: sort, then nested two-pointer; <b>skip duplicates after a hit</b> for uniqueness.</li>
+      <li>“In-place compaction” → write pointer + read pointer; condition controls when to advance write.</li>
+    </ul>
+
+    <h3>Sliding window</h3>
+    <ul>
+      <li><b>“Exactly K distinct” = “at most K” − “at most K-1”</b>. Same template, two calls.</li>
+      <li>Use a fixed-size counter array for ASCII, integer <code class="inline">distinct</code> counter is faster than rechecking the map.</li>
+      <li>For fixed-window problems, add new element first, then drop the leaving element, then record answer.</li>
+    </ul>
+
+    <h3>Binary search</h3>
+    <ul>
+      <li>Phrase as monotone predicate <code class="inline">P(x)</code> over the answer space. The search reduces to “lowest true”.</li>
+      <li>Use half-open <code class="inline">[lo, hi)</code>; updates: <code class="inline">lo = m+1</code> or <code class="inline">hi = m</code>. No infinite loops, ever.</li>
+      <li>Rotated array → check which half is sorted using <code class="inline">a[lo] &lt;= a[m]</code>.</li>
+      <li>Floating-point: iterate 60–100 times instead of comparing for equality.</li>
+    </ul>
+
+    <h3>Linked lists</h3>
+    <ul>
+      <li>Always use a <b>dummy head</b>; simplifies head-deletion and merge logic.</li>
+      <li>Floyd's cycle: after meeting, reset one pointer to head, advance both by 1; meet point = cycle start.</li>
+      <li>Reverse, swap pairs, reorder list → all variations of the 3-pointer reverse.</li>
+      <li>Length difference trick (two lists): advance the longer by Δ first, then walk together.</li>
+    </ul>
+
+    <h3>Stacks & queues</h3>
+    <ul>
+      <li><b>Monotonic stack</b> for next-greater/smaller, histograms, daily temperatures. Push <b>indices</b>, not values.</li>
+      <li>Append a <b>sentinel 0</b> at the end of histograms to flush remaining stack entries.</li>
+      <li>“Largest rectangle in histogram” → monotonic increasing stack of indices.</li>
+      <li>Two stacks = queue (amortized O(1)). Stack with min/max → store (value, runningMin) pairs.</li>
+    </ul>
+
+    <h3>Hashing</h3>
+    <ul>
+      <li>Sliding count map: when count hits 0, <code class="inline">delete</code> the key so <code class="inline">len(map)</code> equals distinct.</li>
+      <li>For grouping-by-shape (anagrams, shifted strings, isomorphic) → derive a canonical key.</li>
+      <li>For 2-sum style → store <code class="inline">complement → index</code>, single pass.</li>
+      <li>Use a struct or <code class="inline">[N]int</code> as a map key — Go allows comparable composite keys.</li>
+    </ul>
+
+    <h3>Heaps</h3>
+    <ul>
+      <li><b>k-th largest</b> → min-heap of size k. <b>k-th smallest</b> → max-heap of size k.</li>
+      <li>Two heaps for running median: max-heap (lower half) + min-heap (upper half), rebalance after each insert.</li>
+      <li>Merge k sorted lists → heap of (val, listIdx, nodeIdx), pop & push next.</li>
+    </ul>
+
+    <h3>Trees</h3>
+    <ul>
+      <li>Recursion returns the <b>useful local quantity</b> (depth, sum, max-path-through-node) — not just the final answer. Update a closure-captured global.</li>
+      <li>BST → in-order traversal is sorted; use iterative stack for k-th smallest.</li>
+      <li>LCA: post-order recursion; node returns itself if it equals p or q; if both children non-nil → current.</li>
+      <li>Serialize with pre-order + null markers; deserialize with a queue/index.</li>
+      <li>Tree DP: at each node, return ≥1 number to its parent (e.g. (robThis, skipThis) for House Robber III).</li>
+    </ul>
+
+    <h3>Tries</h3>
+    <ul>
+      <li>Array children <code class="inline">[26]*Node</code> for lowercase only; map for arbitrary alphabets.</li>
+      <li>Mark <code class="inline">isWord</code> flag at end nodes; store extra metadata (count, indexes) for autocomplete.</li>
+      <li><b>XOR-max-pair</b> → binary trie of bits, greedy go-opposite-bit at each level.</li>
+    </ul>
+
+    <h3>Graphs</h3>
+    <ul>
+      <li>Build adjacency list once: <code class="inline">adj := make([][]int, n)</code>.</li>
+      <li>BFS for unweighted shortest path; record parent for path reconstruction.</li>
+      <li>Multi-source BFS: push <b>all sources</b> at step 0 — used for “nearest 0”, “rotting oranges”.</li>
+      <li>0/1-BFS (edges of weight 0 or 1) → deque; push-front for weight-0 edges, push-back for weight-1.</li>
+      <li>Dijkstra: lazy deletion (push duplicates, skip when popped distance > known) is simpler than decrease-key.</li>
+      <li>Detect cycle in <b>directed</b> graph → DFS with 3 colors (white/gray/black) or Kahn's in-degree.</li>
+      <li>Detect cycle in <b>undirected</b> → DFS tracking parent, or Union-Find while iterating edges.</li>
+      <li>Bipartite check → BFS 2-coloring.</li>
+      <li>Bridges & articulation points → Tarjan's <code class="inline">disc/low</code> arrays.</li>
+      <li>Strongly connected components → Tarjan or Kosaraju (two DFS passes on the original then transpose).</li>
+    </ul>
+
+    <h3>Backtracking</h3>
+    <ul>
+      <li>Template: <code class="inline">choose → recurse → un-choose</code>. Modify shared slice/map in place; copy on save.</li>
+      <li><b>Append a copy</b> of the current path before pushing into results: <code class="inline">res = append(res, append([]int(nil), path...))</code>.</li>
+      <li>Order matters → permutations (used[]). Order doesn't → combinations (pass a start index).</li>
+      <li>Prune early: sort first, break when sum exceeds target, skip duplicates with <code class="inline">i &gt; start &amp;&amp; nums[i]==nums[i-1]</code>.</li>
+      <li>N-Queens → 3 sets: cols, diag1 (r+c), diag2 (r-c+n).</li>
+      <li>Sudoku → bitmask row/col/box, recurse on the most-constrained cell first.</li>
+    </ul>
+
+    <h3>Greedy</h3>
+    <ul>
+      <li>Try sorting by one key (start, end, ratio). 90% of greedy problems collapse after the right sort.</li>
+      <li>Prove correctness with an <b>exchange argument</b>: swap to “optimal” order without losing value.</li>
+      <li>Interval scheduling → sort by end time, pick first that doesn't overlap.</li>
+      <li>Jump Game → keep <code class="inline">maxReach</code>; if i > maxReach, impossible.</li>
+      <li>Gas station → if total &lt; 0 impossible; otherwise the answer is right after the last point where running sum went negative.</li>
+    </ul>
+
+    <h3>Dynamic programming</h3>
+    <ul>
+      <li>Identify <b>state</b> first (the smallest tuple that fully describes a sub-problem). Then transitions.</li>
+      <li>Top-down (memo) is easier to derive; bottom-up gives space-rolling.</li>
+      <li>1D DP with <code class="inline">dp[i]</code> based on a few previous → roll to <code class="inline">O(1)</code> space.</li>
+      <li>2D DP with <code class="inline">dp[i][j]</code> only depending on previous row → roll to two rows.</li>
+      <li><b>0/1 knapsack</b>: iterate capacity from high to low (1D).</li>
+      <li><b>Unbounded knapsack</b>: iterate capacity from low to high.</li>
+      <li><b>LIS in O(n log n)</b>: maintain <code class="inline">tails</code>, binary-search insertion point.</li>
+      <li>Interval DP (matrix chain, burst balloons): outer loop = length; inner = left; split = k in (l, r).</li>
+      <li>Digit DP: recurse on (pos, tight, leadingZero, state); memo on (pos, state) when not tight.</li>
+      <li>Bitmask DP for n ≤ 20: state is a subset; transitions add one element.</li>
+    </ul>
+
+    <h3>Bit manipulation</h3>
+<pre data-lang="go">x &amp; (x-1)        // clears lowest set bit
+x &amp; -x           // isolates lowest set bit
+bits.OnesCount(uint(x))      // popcount
+bits.TrailingZeros(uint(x))  // index of lowest set bit
+x ^ y            // diff; XOR all numbers to find the single unique one
+// Enumerate every submask of mask:
+for sub := mask; sub &gt; 0; sub = (sub-1) &amp; mask { /* ... */ }
+</pre>
+    <ul>
+      <li>Single number among pairs → XOR everything.</li>
+      <li>Two unique numbers among pairs → XOR all, isolate any set bit, split into 2 groups, XOR each.</li>
+      <li>Subset enumeration → iterate <code class="inline">0..(1&lt;&lt;n)-1</code>.</li>
+    </ul>
+
+    <h3>Math & number theory</h3>
+    <ul>
+      <li>gcd(a, b) = gcd(b, a%b); lcm = a / gcd * b (multiply after division to avoid overflow).</li>
+      <li>Modular exponentiation in O(log n) via square-and-multiply.</li>
+      <li>Sieve of Eratosthenes for primes ≤ 10⁷.</li>
+      <li>Fast inverse mod p (prime): <code class="inline">pow(a, p-2, p)</code>.</li>
+      <li>Reservoir sampling for k items from a stream of unknown length.</li>
+    </ul>
+
+    <h2 data-cram="essential">5. Edge-case checklist (run mentally before submitting)</h2>
+    <ul>
+      <li>Empty input (<code class="inline">""</code>, <code class="inline">[]</code>, <code class="inline">nil</code>)</li>
+      <li>Single element / two equal elements</li>
+      <li>All elements equal / strictly increasing / strictly decreasing</li>
+      <li>Negative numbers, zero, integer overflow</li>
+      <li>Maximum/minimum allowed input size (does your O(n²) fit?)</li>
+      <li>Duplicates in input (esp. for k-Sum, BST insertion)</li>
+      <li>Disconnected graph / cycle / self-loop</li>
+      <li>Linked list with 0, 1, 2 nodes</li>
+      <li>Recursion depth (stack overflow on n = 10⁵ linked list reverse)</li>
+      <li>Off-by-one on inclusive / exclusive bounds</li>
+    </ul>
+
+    <h2>6. “Optimal target complexity” cheat per category</h2>
+    <table>
+      <thead><tr><th>Problem class</th><th>Target</th></tr></thead>
+      <tbody>
+        <tr><td>Array / string scan</td><td>O(n) time, O(1) extra</td></tr>
+        <tr><td>Sorting-based</td><td>O(n log n)</td></tr>
+        <tr><td>Sliding window</td><td>O(n)</td></tr>
+        <tr><td>Hash lookup</td><td>O(n) avg</td></tr>
+        <tr><td>Binary search on answer</td><td>O(n log V) where V = answer range</td></tr>
+        <tr><td>BFS / DFS on graph</td><td>O(V + E)</td></tr>
+        <tr><td>Dijkstra</td><td>O((V+E) log V)</td></tr>
+        <tr><td>2D DP (strings, knapsack)</td><td>O(n·m)</td></tr>
+        <tr><td>Interval DP</td><td>O(n³)</td></tr>
+        <tr><td>Bitmask DP, n ≤ 20</td><td>O(n · 2ⁿ)</td></tr>
+      </tbody>
+    </table>
+
+    <h2 data-cram="essential">7. Anti-patterns that lose interviews</h2>
+    <ul>
+      <li>Coding before stating an approach and complexity.</li>
+      <li>Using <code class="inline">map</code> when a 26-element array suffices.</li>
+      <li>Recursing without explaining base case / memo size.</li>
+      <li>Re-allocating in a hot loop (string += in a tight loop).</li>
+      <li>Mutating input without warning the interviewer.</li>
+      <li>Not closing the loop: forgetting to update min/max, missing the last window, off-by-one on lower-bound binary search.</li>
+      <li>Ignoring overflow — use <code class="inline">int64</code> when sums can exceed 2³¹.</li>
+    </ul>
+
+    <h2 data-cram="essential">8. Time-boxed interview routine</h2>
+    <ul>
+      <li><b>0–2 min</b>: restate problem, ask 3 clarifying questions, list assumptions.</li>
+      <li><b>2–5 min</b>: walk through 2 examples (1 normal, 1 edge).</li>
+      <li><b>5–10 min</b>: brute force → optimization → final complexity. Get explicit “sounds good”.</li>
+      <li><b>10–30 min</b>: code, narrate each block, name variables meaningfully.</li>
+      <li><b>30–40 min</b>: dry-run on the small example, then an edge case. Fix any bugs.</li>
+      <li><b>40–45 min</b>: discuss follow-ups (scale, concurrency, memory, streaming).</li>
+    </ul>
+
+    <h2 data-cram="essential">9. Templates I memorize cold (and you should too)</h2>
+    <ol>
+      <li>BFS on grid (queue, visited via overwrite)</li>
+      <li>DFS recursion with three-color cycle detection</li>
+      <li>Topological sort (Kahn)</li>
+      <li>Union-Find with path compression + union by size</li>
+      <li>Dijkstra with lazy deletion</li>
+      <li>Heap (min/max) in Go with <code class="inline">container/heap</code></li>
+      <li>Monotonic stack template (next greater)</li>
+      <li>Monotonic deque for sliding-window max</li>
+      <li>Binary search (lower bound) on index AND on answer</li>
+      <li>Backtracking with prune + skip-duplicates</li>
+      <li>Trie node + insert/search/startsWith</li>
+      <li>Segment tree with lazy propagation (for n ≤ 10⁵ range updates)</li>
+      <li>0/1 knapsack 1D and LIS O(n log n)</li>
+      <li>Sliding-window “at most K distinct” + “exactly K = ≤K − ≤K-1”</li>
+      <li>Fast & slow linked-list pointer</li>
+    </ol>
+
+    <blockquote class="ok">Memorize these 15 templates and ~80% of LeetCode collapses into pattern-matching + parameter tweaking. The other 20% is creativity built on top.</blockquote>
+
+    <div class="footer">See pattern pages for full Go implementations of each template ↑</div>
+  </main>
+</div>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>

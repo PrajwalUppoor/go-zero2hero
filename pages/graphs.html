@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Graphs — Go: Zero → Hero</title>
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar-root"></aside>
+  <main class="main">
+    <div class="crumbs"><a href="../index.html">Home</a> / Patterns / Graphs</div>
+    <section class="page-header">
+      <div>
+        <h1>Graphs — BFS, DFS, Topological Sort, Union-Find, Dijkstra</h1>
+        <p>The most tactically rich category. Pick the right traversal first; then watch every other problem fall.</p>
+      </div>
+    </section>
+
+    <h2 data-cram="essential">Mental model</h2>
+    <ul>
+      <li><b>Pick the right traversal first</b>; the rest follows. Decision tree:
+        <ul>
+          <li>Unweighted shortest path → <b>BFS</b>.</li>
+          <li>Reachability / connectivity / cycles → <b>DFS</b> (or DSU for connectivity-only).</li>
+          <li>Ordering with prerequisites → <b>topo sort</b> (Kahn or DFS).</li>
+          <li>Weighted shortest path, non-negative → <b>Dijkstra</b>.</li>
+          <li>Weighted with negatives → <b>Bellman-Ford</b> / SPFA.</li>
+          <li>All-pairs (n ≤ 400) → <b>Floyd-Warshall</b>.</li>
+          <li>MST → <b>Kruskal (sorted edges + DSU)</b> or Prim.</li>
+        </ul>
+      </li>
+      <li><b>Grids are graphs in disguise.</b> 4- or 8-direction neighbors via <code class="inline">dr/dc</code> arrays. Flatten <code class="inline">(r,c)</code> to a single int via <code class="inline">r*C+c</code> if you need a hashable key.</li>
+      <li><b>For "components / merge / disjoint groups"</b>, Union-Find gives near-O(α(n)) per op — preferred over DFS when you only need connectivity.</li>
+      <li><b>Pre-compute</b> in-degrees / adjacency before iterating, even if it costs an extra pass — the inner loop will thank you.</li>
+    </ul>
+
+    <h2 data-cram="essential">Representations</h2>
+<pre data-lang="go">// Adjacency list (almost always the right choice)
+adj := make([][]int, n)
+for _, e := range edges {
+    adj[e[0]] = append(adj[e[0]], e[1])
+    adj[e[1]] = append(adj[e[1]], e[0]) // undirected
+}
+
+// Weighted
+type Edge struct{ To, W int }
+adj := make([][]Edge, n)
+</pre>
+
+    <h2 data-cram="essential">BFS — shortest path in an unweighted graph</h2>
+<pre data-lang="go">func bfs(src int, adj [][]int) []int {
+    n := len(adj)
+    dist := make([]int, n); for i := range dist { dist[i] = -1 }
+    dist[src] = 0
+    q := []int{src}
+    for len(q) &gt; 0 {
+        u := q[0]; q = q[1:]
+        for _, v := range adj[u] {
+            if dist[v] == -1 { dist[v] = dist[u] + 1; q = append(q, v) }
+        }
+    }
+    return dist
+}
+</pre>
+    <ul>
+      <li><b>Multi-source BFS</b>: push every source into the queue at distance 0 (e.g. nearest 0, rotting oranges).</li>
+      <li><b>0/1-BFS</b>: deque, push-front for 0-weight, push-back for 1-weight.</li>
+      <li><b>Bi-directional BFS</b>: from src and dst, meet in the middle — great for word ladder.</li>
+    </ul>
+
+    <h2>DFS template + 3-color cycle detection</h2>
+<pre data-lang="go">const (white, gray, black = 0, 1, 2)
+
+func hasCycleDirected(adj [][]int) bool {
+    color := make([]int, len(adj))
+    var dfs func(u int) bool
+    dfs = func(u int) bool {
+        color[u] = gray
+        for _, v := range adj[u] {
+            if color[v] == gray { return true }            // back-edge
+            if color[v] == white &amp;&amp; dfs(v) { return true }
+        }
+        color[u] = black
+        return false
+    }
+    for u := range adj {
+        if color[u] == white &amp;&amp; dfs(u) { return true }
+    }
+    return false
+}
+</pre>
+
+    <h2 data-cram="essential">Topological sort (Kahn / BFS)</h2>
+<pre data-lang="go">func topo(n int, adj [][]int) ([]int, bool) {
+    in := make([]int, n)
+    for u := 0; u &lt; n; u++ { for _, v := range adj[u] { in[v]++ } }
+    var q []int
+    for u := 0; u &lt; n; u++ { if in[u] == 0 { q = append(q, u) } }
+    order := make([]int, 0, n)
+    for len(q) &gt; 0 {
+        u := q[0]; q = q[1:]; order = append(order, u)
+        for _, v := range adj[u] {
+            in[v]--
+            if in[v] == 0 { q = append(q, v) }
+        }
+    }
+    return order, len(order) == n  // false → cycle
+}
+</pre>
+
+    <h2 data-cram="essential">Union-Find (DSU)</h2>
+<pre data-lang="go">type DSU struct{ parent, size []int }
+func NewDSU(n int) *DSU {
+    p := make([]int, n); s := make([]int, n)
+    for i := range p { p[i] = i; s[i] = 1 }
+    return &amp;DSU{p, s}
+}
+func (d *DSU) Find(x int) int {
+    for d.parent[x] != x {
+        d.parent[x] = d.parent[d.parent[x]]   // path compression (1-step)
+        x = d.parent[x]
+    }
+    return x
+}
+func (d *DSU) Union(a, b int) bool {
+    ra, rb := d.Find(a), d.Find(b)
+    if ra == rb { return false }
+    if d.size[ra] &lt; d.size[rb] { ra, rb = rb, ra }
+    d.parent[rb] = ra
+    d.size[ra] += d.size[rb]
+    return true
+}
+</pre>
+    <ul>
+      <li>Use cases: connected components, redundant edge, accounts merge, Kruskal MST, friend circles.</li>
+      <li>Near O(α(n)) per op with path compression + union by size/rank.</li>
+    </ul>
+
+    <h2 data-cram="essential">Dijkstra (single-source, non-negative weights)</h2>
+<pre data-lang="go">// Sketch — see Heaps page for full PQ definition.
+func dijkstra(src, n int, adj [][]Edge) []int {
+    const INF = int(1e18)
+    dist := make([]int, n); for i := range dist { dist[i] = INF }
+    dist[src] = 0
+    pq := &amp;PQ{{src, 0}}
+    for pq.Len() &gt; 0 {
+        it := heap.Pop(pq).(PQItem)
+        if it.Dist &gt; dist[it.Node] { continue }
+        for _, e := range adj[it.Node] {
+            if nd := it.Dist + e.W; nd &lt; dist[e.To] {
+                dist[e.To] = nd
+                heap.Push(pq, PQItem{e.To, nd})
+            }
+        }
+    }
+    return dist
+}
+</pre>
+    <ul>
+      <li>Negative edges → Bellman-Ford (O(V·E)) or SPFA.</li>
+      <li>All-pairs (n ≤ 400) → Floyd-Warshall (O(n³)).</li>
+      <li>Single-source DAG → topological order + relax.</li>
+    </ul>
+
+    <h2>MST (Kruskal & Prim)</h2>
+    <ul>
+      <li><b>Kruskal</b>: sort edges by weight, add if endpoints are in different DSU sets. O(E log E).</li>
+      <li><b>Prim</b>: grow tree from a node using a heap of crossing edges. O(E log V).</li>
+    </ul>
+
+    <h2>Grid problems as graphs</h2>
+<pre data-lang="go">dr := []int{-1, 1, 0, 0}
+dc := []int{0, 0, -1, 1}
+// BFS / DFS with (r, c). Overwrite visited cells with a sentinel to save space.
+</pre>
+
+    <h2>Advanced topics worth knowing</h2>
+    <ul>
+      <li><b>Tarjan SCC</b> / Kosaraju (two-pass on reverse graph).</li>
+      <li><b>Bridges & articulation points</b> — DFS with disc/low arrays.</li>
+      <li><b>Bipartite check</b> — BFS 2-coloring; failure ⇒ odd cycle.</li>
+      <li><b>Eulerian path</b> — Hierholzer.</li>
+      <li><b>Maximum bipartite matching</b> — Hopcroft–Karp (advanced).</li>
+    </ul>
+
+    <h2 data-cram="essential">Classic problems</h2>
+    <table>
+      <thead><tr><th>Problem</th><th>Tool</th><th>Time</th></tr></thead>
+      <tbody>
+        <tr><td>Number of Islands · Max Area · Flood Fill</td><td>BFS / DFS / DSU</td><td>O(mn)</td></tr>
+        <tr><td>Surrounded Regions / Pacific-Atlantic</td><td>BFS from boundary (multi-source)</td><td>O(mn)</td></tr>
+        <tr><td>Course Schedule I / II</td><td>Topo sort (Kahn) / DFS cycle detect</td><td>O(V+E)</td></tr>
+        <tr><td>Alien Dictionary</td><td>Topo sort on letters</td><td>O(N+Σ²)</td></tr>
+        <tr><td>Word Ladder I / II</td><td>BFS / bidirectional BFS</td><td>O(N·L²)</td></tr>
+        <tr><td>Rotting Oranges</td><td>Multi-source BFS</td><td>O(mn)</td></tr>
+        <tr><td>Clone Graph</td><td>BFS or DFS with map old → new</td><td>O(V+E)</td></tr>
+        <tr><td>Network Delay Time</td><td>Dijkstra</td><td>O((V+E) log V)</td></tr>
+        <tr><td>Cheapest Flights K Stops</td><td>Bellman-Ford k+1 iters / heap state</td><td>O(K·E)</td></tr>
+        <tr><td>Path with Min Effort / Swim in Rising Water</td><td>Dijkstra on max-edge-cost path</td><td>O((V+E) log V)</td></tr>
+        <tr><td>Redundant Connection / Number of Provinces</td><td>Union-Find</td><td>α(n) per op</td></tr>
+        <tr><td>Accounts Merge</td><td>DSU on emails</td><td>O(N α(N))</td></tr>
+        <tr><td>Reconstruct Itinerary</td><td>Hierholzer (Eulerian path)</td><td>O(E log E)</td></tr>
+        <tr><td>Critical Connections</td><td>Tarjan bridges</td><td>O(V+E)</td></tr>
+        <tr><td>Min Cost to Connect Cities</td><td>Kruskal MST</td><td>O(E log E)</td></tr>
+        <tr><td>Walls and Gates</td><td>Multi-source BFS from gates</td><td>O(mn)</td></tr>
+        <tr><td>Shortest Path in Binary Matrix</td><td>BFS with 8-direction neighbors</td><td>O(mn)</td></tr>
+        <tr><td>01 Matrix</td><td>Multi-source BFS from 0s or 2-pass DP</td><td>O(mn)</td></tr>
+        <tr><td>Bus Routes</td><td>BFS over routes (not stops)</td><td>O(B² + S)</td></tr>
+        <tr><td>Is Graph Bipartite?</td><td>BFS 2-coloring</td><td>O(V+E)</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Anti-patterns — what NOT to say</h2>
+    <ul>
+      <li>"I'll DFS to find the shortest path." DFS doesn't find shortest paths in unweighted graphs — BFS does.</li>
+      <li>Running Dijkstra on a graph with negative edges. Use Bellman-Ford.</li>
+      <li>Forgetting to mark <i>before pushing</i> in BFS — the same node gets enqueued multiple times.</li>
+      <li>Iterating <code class="inline">map</code> as a queue without preserving order.</li>
+      <li>Building an O(V²) adjacency matrix on a sparse graph (dump V=10⁵ in your face).</li>
+      <li>Recursing without cycle protection — infinite loop.</li>
+    </ul>
+
+    <h2 data-cram="essential">Senior interviewer follow-ups</h2>
+    <table>
+      <thead><tr><th>Probe</th><th>What they want to hear</th></tr></thead>
+      <tbody>
+        <tr><td>"BFS vs DFS for shortest path?"</td><td>BFS only when all edges are equal weight (or 0/1 with deque-BFS); otherwise Dijkstra.</td></tr>
+        <tr><td>"How does Kahn's topo sort detect cycles?"</td><td>If output length &lt; V, some nodes never reached in-degree 0 → there's a cycle.</td></tr>
+        <tr><td>"Why path compression + union by size for DSU?"</td><td>Combined gives near-constant α(n) per op; either alone is O(log n).</td></tr>
+        <tr><td>"Dijkstra correctness intuition?"</td><td>Once a node is popped, no shorter path is possible; non-negative edges guarantee popped distance is final.</td></tr>
+        <tr><td>"Bidirectional BFS speedup?"</td><td>Search from both ends; meeting in the middle reduces frontier from b^d to 2·b^(d/2).</td></tr>
+        <tr><td>"How to detect a cycle in an undirected graph?"</td><td>DFS tracking parent (or DSU union returning false on common root).</td></tr>
+        <tr><td>"How does Bellman-Ford handle negative cycles?"</td><td>Run V-1 relaxations; one more iteration that still relaxes ⇒ negative cycle reachable from source.</td></tr>
+      </tbody>
+    </table>
+
+    <h2 data-cram="essential">Self-check</h2>
+    <ul class="checklist" data-key="graphs-check">
+      <li><input type="checkbox"/><span>I can build adjacency lists from edge lists for both directed and undirected graphs.</span></li>
+      <li><input type="checkbox"/><span>I can write BFS shortest path from memory.</span></li>
+      <li><input type="checkbox"/><span>I can write DFS with 3-color cycle detection.</span></li>
+      <li><input type="checkbox"/><span>I can write Kahn's topo sort and detect cycles.</span></li>
+      <li><input type="checkbox"/><span>I can write Union-Find with path compression + union by size.</span></li>
+      <li><input type="checkbox"/><span>I can write Dijkstra with lazy deletion.</span></li>
+      <li><input type="checkbox"/><span>I can describe Bellman-Ford and when it's needed.</span></li>
+      <li><input type="checkbox"/><span>I know multi-source BFS (rotting oranges, walls and gates).</span></li>
+      <li><input type="checkbox"/><span>I can write Kruskal's MST with DSU.</span></li>
+      <li><input type="checkbox"/><span>I can solve grid problems with <code class="inline">dr/dc</code> arrays.</span></li>
+      <li><input type="checkbox"/><span>I can do bidirectional BFS for word ladder.</span></li>
+      <li><input type="checkbox"/><span>I can find bridges/articulation points (Tarjan).</span></li>
+    </ul>
+
+    <div class="footer">Next → <a href="backtracking.html">Backtracking</a></div>
+  </main>
+</div>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>

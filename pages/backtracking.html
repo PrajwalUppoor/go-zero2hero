@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Backtracking — Go: Zero → Hero</title>
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar-root"></aside>
+  <main class="main">
+    <div class="crumbs"><a href="../index.html">Home</a> / Patterns / Backtracking</div>
+    <section class="page-header">
+      <div>
+        <h1>Backtracking</h1>
+        <p>“Generate all / find any / enumerate every…”. Choose → recurse → un-choose. Prune ruthlessly, copy when saving.</p>
+      </div>
+    </section>
+
+    <h2 data-cram="essential">Mental model</h2>
+    <ul>
+      <li><b>The trigger</b>: "all subsets / permutations / combinations / partitions / arrangements / valid sequences / generate".</li>
+      <li><b>The structure</b>: choose → recurse → un-choose. Always copy the path before saving (the slice is mutated in place).</li>
+      <li><b>Three flavors</b>:
+        <ol>
+          <li><b>Subsets / combinations</b> — pick or skip each item; pass an <code class="inline">i</code> to avoid revisiting.</li>
+          <li><b>Permutations</b> — track <code class="inline">used[]</code> so each element appears once per arrangement.</li>
+          <li><b>Constraint problems</b> (N-Queens, Sudoku, Word Search) — propagate constraints; backtrack only on failure.</li>
+        </ol>
+      </li>
+      <li><b>Pruning is the difference between TLE and accepted</b>: sort first, skip duplicates, break on remaining-too-small.</li>
+      <li><b>If the recursion has overlapping subproblems, it's DP</b> — memoize and lift.</li>
+    </ul>
+
+    <h2 data-cram="essential">Universal template</h2>
+<pre data-lang="go">func backtrack(path []T, choices ...) {
+    if isGoal(path) {
+        save(append([]T(nil), path...))   // copy before storing
+        return
+    }
+    for _, c := range nextChoices(path) {
+        if !valid(path, c) { continue }
+        path = append(path, c)
+        backtrack(path, ...)
+        path = path[:len(path)-1]         // un-choose
+    }
+}
+</pre>
+
+    <h2 data-cram="essential">Subsets (combinations of all sizes)</h2>
+<pre data-lang="go">func subsets(nums []int) [][]int {
+    var res [][]int
+    var path []int
+    var rec func(i int)
+    rec = func(i int) {
+        res = append(res, append([]int(nil), path...))
+        for j := i; j &lt; len(nums); j++ {
+            path = append(path, nums[j])
+            rec(j + 1)
+            path = path[:len(path)-1]
+        }
+    }
+    rec(0)
+    return res
+}
+</pre>
+
+    <h2>Permutations</h2>
+<pre data-lang="go">func permute(nums []int) [][]int {
+    var res [][]int
+    used := make([]bool, len(nums))
+    var path []int
+    var rec func()
+    rec = func() {
+        if len(path) == len(nums) {
+            res = append(res, append([]int(nil), path...))
+            return
+        }
+        for i, v := range nums {
+            if used[i] { continue }
+            used[i] = true; path = append(path, v)
+            rec()
+            used[i] = false; path = path[:len(path)-1]
+        }
+    }
+    rec()
+    return res
+}
+</pre>
+
+    <h2>Combination Sum (unbounded reuse)</h2>
+<pre data-lang="go">func combinationSum(nums []int, target int) [][]int {
+    sort.Ints(nums)
+    var res [][]int; var path []int
+    var rec func(i, rem int)
+    rec = func(i, rem int) {
+        if rem == 0 { res = append(res, append([]int(nil), path...)); return }
+        for j := i; j &lt; len(nums) &amp;&amp; nums[j] &lt;= rem; j++ {
+            path = append(path, nums[j])
+            rec(j, rem-nums[j])          // j (reuse), not j+1
+            path = path[:len(path)-1]
+        }
+    }
+    rec(0, target)
+    return res
+}
+</pre>
+
+    <h2>N-Queens</h2>
+<pre data-lang="go">func solveNQueens(n int) [][]string {
+    cols := make([]bool, n)
+    d1   := make([]bool, 2*n)           // r + c
+    d2   := make([]bool, 2*n)           // r - c + n
+    pos  := make([]int, n)
+    var res [][]string
+    var rec func(r int)
+    rec = func(r int) {
+        if r == n {
+            board := make([]string, n)
+            for i, c := range pos {
+                row := make([]byte, n); for k := range row { row[k] = '.' }
+                row[c] = 'Q'; board[i] = string(row)
+            }
+            res = append(res, board); return
+        }
+        for c := 0; c &lt; n; c++ {
+            if cols[c] || d1[r+c] || d2[r-c+n] { continue }
+            cols[c], d1[r+c], d2[r-c+n] = true, true, true
+            pos[r] = c
+            rec(r + 1)
+            cols[c], d1[r+c], d2[r-c+n] = false, false, false
+        }
+    }
+    rec(0)
+    return res
+}
+</pre>
+
+    <h2>Word Search (DFS on grid)</h2>
+<pre data-lang="go">func exist(board [][]byte, word string) bool {
+    R, C := len(board), len(board[0])
+    var dfs func(r, c, i int) bool
+    dfs = func(r, c, i int) bool {
+        if i == len(word) { return true }
+        if r &lt; 0 || r &gt;= R || c &lt; 0 || c &gt;= C || board[r][c] != word[i] { return false }
+        board[r][c] = '#'                 // mark visited
+        ok := dfs(r+1,c,i+1) || dfs(r-1,c,i+1) || dfs(r,c+1,i+1) || dfs(r,c-1,i+1)
+        board[r][c] = word[i]             // restore
+        return ok
+    }
+    for r := 0; r &lt; R; r++ {
+        for c := 0; c &lt; C; c++ { if dfs(r, c, 0) { return true } }
+    }
+    return false
+}
+</pre>
+
+    <h2 data-cram="essential">Pruning tactics</h2>
+    <ul>
+      <li><b>Sort first</b>, then <code class="inline">break</code> as soon as remaining choice ≥ remaining budget.</li>
+      <li><b>Skip duplicates</b>: after sorting, in combination/subset problems use <code class="inline">if j &gt; start &amp;&amp; nums[j] == nums[j-1] { continue }</code>.</li>
+      <li><b>Constraint propagation</b>: Sudoku — recurse on the cell with fewest valid options.</li>
+      <li><b>Memoize</b> sub-states when there's overlap (becomes top-down DP).</li>
+    </ul>
+
+    <h2 data-cram="essential">Classic problems</h2>
+    <table>
+      <thead><tr><th>Problem</th><th>Trick</th></tr></thead>
+      <tbody>
+        <tr><td>Subsets I &amp; II</td><td>Pick/skip + dup-skip on II</td></tr>
+        <tr><td>Permutations I &amp; II</td><td><code class="inline">used[]</code> + dup-skip on II</td></tr>
+        <tr><td>Combinations</td><td>Index <code class="inline">i</code> + length budget</td></tr>
+        <tr><td>Combination Sum I / II / III</td><td>Same start / next start / fixed K</td></tr>
+        <tr><td>Palindrome Partitioning</td><td>Slice + palindrome check + recurse on suffix</td></tr>
+        <tr><td>Restore IP Addresses</td><td>3-deep nested split with validity check</td></tr>
+        <tr><td>Letter Combinations of Phone Number</td><td>BFS or recursion on digits</td></tr>
+        <tr><td>Generate Parentheses</td><td>Open ≤ N, close ≤ open</td></tr>
+        <tr><td>Word Search</td><td>DFS with mark-and-restore</td></tr>
+        <tr><td>Word Break II</td><td>DFS + memo of suffix → list of sentences</td></tr>
+        <tr><td>N-Queens I / II</td><td>Cols + 2 diagonals as boolean arrays</td></tr>
+        <tr><td>Sudoku Solver</td><td>Constraint propagation; pick MRV cell first</td></tr>
+        <tr><td>Robot Room Cleaner</td><td>DFS with set of cleaned cells; backtrack with rotate</td></tr>
+        <tr><td>Expression Add Operators</td><td>Track previous operand for *-precedence</td></tr>
+        <tr><td>Beautiful Arrangement</td><td>Permutation with divisibility constraint</td></tr>
+        <tr><td>Partition K Equal Sum Subsets</td><td>Buckets[] with sort-desc + skip-dup</td></tr>
+        <tr><td>Match Subsequence (regex / wildcard)</td><td>Recursion + memo</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Anti-patterns — what NOT to say</h2>
+    <ul>
+      <li><code class="inline">res = append(res, path)</code> without copying — every entry will be aliased to the same slice.</li>
+      <li>Forgetting to un-choose after recursion — leaks state into siblings.</li>
+      <li>Skipping the sort step on inputs with duplicates — duplicate sub-results explode.</li>
+      <li>Recursing without depth bound on adversarial inputs — stack overflow at ~10⁵.</li>
+      <li>Using backtracking when DP would be fine — exponential when O(n²) is on the table.</li>
+    </ul>
+
+    <h2 data-cram="essential">Senior interviewer follow-ups</h2>
+    <table>
+      <thead><tr><th>Probe</th><th>What they want to hear</th></tr></thead>
+      <tbody>
+        <tr><td>"How do you handle duplicates in Subsets II?"</td><td>Sort, then skip <code class="inline">nums[j] == nums[j-1]</code> within the same recursion level (not across).</td></tr>
+        <tr><td>"Permutations II without sorting?"</td><td>Sort + skip <code class="inline">used[i-1] == false &amp;&amp; nums[i] == nums[i-1]</code>.</td></tr>
+        <tr><td>"Estimated time complexity of backtracking?"</td><td>Branching factor × depth — typically <code class="inline">O(b^d)</code>. State + dedup may reduce significantly.</td></tr>
+        <tr><td>"When is backtracking actually DP?"</td><td>When subproblems repeat — same state reached via different paths. Memoize the state.</td></tr>
+        <tr><td>"Why mark-and-restore in Word Search?"</td><td>O(1) extra space — beats a separate visited matrix per call.</td></tr>
+        <tr><td>"Sudoku — most-constrained-variable first?"</td><td>Pick the empty cell with fewest valid digits. Drastically reduces branching.</td></tr>
+      </tbody>
+    </table>
+
+    <h2 data-cram="essential">Self-check</h2>
+    <ul class="checklist" data-key="backtracking-check">
+      <li><input type="checkbox"/><span>I can write the universal backtracking template from memory.</span></li>
+      <li><input type="checkbox"/><span>I can write Subsets, Permutations, Combinations, and their II variants with dup-skip.</span></li>
+      <li><input type="checkbox"/><span>I can write Combination Sum I and II.</span></li>
+      <li><input type="checkbox"/><span>I can solve N-Queens with cols + 2 diagonals arrays.</span></li>
+      <li><input type="checkbox"/><span>I can solve Word Search with mark-and-restore.</span></li>
+      <li><input type="checkbox"/><span>I can solve Generate Parentheses with the (open, close) state.</span></li>
+      <li><input type="checkbox"/><span>I can solve Palindrome Partitioning with backtracking + DP-cache.</span></li>
+      <li><input type="checkbox"/><span>I always copy the path before storing.</span></li>
+      <li><input type="checkbox"/><span>I prune by sorting + early break + dup-skip when possible.</span></li>
+      <li><input type="checkbox"/><span>I recognize when backtracking subproblems repeat and lift to DP.</span></li>
+    </ul>
+
+    <div class="footer">Next → <a href="greedy.html">Greedy</a></div>
+  </main>
+</div>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>

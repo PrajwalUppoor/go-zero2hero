@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>System Design Fundamentals — Go: Zero → Hero</title>
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar-root"></aside>
+  <main class="main">
+    <div class="crumbs"><a href="../index.html">Home</a> / System Design / Fundamentals</div>
+    <section class="page-header">
+      <div>
+        <h1>System Design Fundamentals</h1>
+        <p>The vocabulary, mental models, and math you need to reason about any distributed system in 45 minutes.</p>
+      </div>
+    </section>
+
+    <h2 data-cram="essential">Mental model</h2>
+    <ul>
+      <li><b>Drive the interview</b>: clarify, estimate, sketch, deepen, trade off, summarize. Senior candidates lead the conversation rather than wait for prompts.</li>
+      <li><b>Three numbers to anchor everything</b>: 100 ns (memory) · 500 µs (DC RTT) · 150 ms (cross-continent RTT). Order of magnitude differences drive every architectural choice.</li>
+      <li><b>Trade-offs, not religions</b>: SQL vs NoSQL, cache-aside vs write-through, push vs pull, monolith vs microservices — every choice is contextual.</li>
+      <li><b>Operational thinking is what separates seniors</b>: failure modes, observability, rollouts, capacity, on-call. Don't end with a happy-path diagram.</li>
+      <li><b>SLO-driven design</b>: pick targets first (e.g. p99 ≤ 100 ms, 99.9% availability) then work backwards through the stack.</li>
+    </ul>
+
+    <h2 data-cram="essential">The 7-step interview framework</h2>
+    <ol>
+      <li><b>Requirements</b> — functional (5–6) + non-functional (latency, availability, durability, consistency, scale).</li>
+      <li><b>Capacity estimation</b> — QPS, storage, bandwidth, working set.</li>
+      <li><b>API design</b> — REST/gRPC endpoints; idempotency keys; pagination.</li>
+      <li><b>High-level architecture</b> — boxes & arrows: client → LB → service → cache → DB → async pipeline.</li>
+      <li><b>Data model & storage</b> — schemas, indexes, choice of database, sharding key.</li>
+      <li><b>Deep dives</b> — pick 2–3 components and stress-test (hotspots, failure modes, observability).</li>
+      <li><b>Trade-offs & follow-ups</b> — what would you do at 100x scale? What about cross-region?</li>
+    </ol>
+
+    <h2 data-cram="essential">The numbers every senior must know</h2>
+    <table>
+      <thead><tr><th>Operation</th><th>Latency</th></tr></thead>
+      <tbody>
+        <tr><td>L1 cache reference</td><td>~1 ns</td></tr>
+        <tr><td>L2 cache reference</td><td>~4 ns</td></tr>
+        <tr><td>Main memory reference</td><td>~100 ns</td></tr>
+        <tr><td>Compress 1 KB (snappy)</td><td>~2 µs</td></tr>
+        <tr><td>Send 1 KB over 1 Gbps network</td><td>~10 µs</td></tr>
+        <tr><td>SSD random read (4 KB)</td><td>~150 µs</td></tr>
+        <tr><td>Memory read 1 MB sequentially</td><td>~250 µs</td></tr>
+        <tr><td>Round-trip within same datacenter</td><td>~500 µs</td></tr>
+        <tr><td>SSD read 1 MB sequentially</td><td>~1 ms</td></tr>
+        <tr><td>Disk (HDD) seek</td><td>~10 ms</td></tr>
+        <tr><td>HDD read 1 MB sequentially</td><td>~20 ms</td></tr>
+        <tr><td>Round-trip CA ↔ Netherlands</td><td>~150 ms</td></tr>
+      </tbody>
+    </table>
+    <blockquote>Memory ≈ 100× SSD ≈ 10,000× cross-continent RTT. Optimize for fewer round trips first, then for cache hits, then for CPU.</blockquote>
+
+    <h2 data-cram="essential">Capacity-estimation recipes</h2>
+<pre data-lang="go">// Daily QPS → peak
+dau := 100_000_000
+reqs_per_user_day := 20
+total_per_day := dau * reqs_per_user_day                  // 2 * 10^9
+avg_qps := total_per_day / 86_400                          // ~ 23,000
+peak_qps := avg_qps * 3                                    // ~ 70,000
+
+// Storage (5-year retention, 2 KB per event)
+events_per_day := total_per_day                            // 2 * 10^9
+bytes_per_day  := events_per_day * 2_000                   // 4 TB / day
+total_storage  := bytes_per_day * 365 * 5                  // ~ 7.3 PB raw
+// Add replication factor 3 → ~22 PB
+</pre>
+    <ul>
+      <li>1 KB ≈ 10³ B · 1 MB ≈ 10⁶ B · 1 GB ≈ 10⁹ B.</li>
+      <li>1 day = 86,400 s ≈ 10⁵ s.</li>
+      <li>Peak = 2–10× average; design for 3× unless told otherwise.</li>
+    </ul>
+
+    <h2>Latency, throughput, availability, durability</h2>
+    <ul>
+      <li><b>Latency</b> — time per request. Care about p50/p95/p99/p999 not just averages.</li>
+      <li><b>Throughput</b> — requests/sec the system can sustain. Limited by the slowest component.</li>
+      <li><b>Availability</b> — % uptime. “3 nines” = 8.76h/yr down, “4 nines” = 52m/yr, “5 nines” = 5m/yr.</li>
+      <li><b>Durability</b> — probability data persists once acknowledged. 11 nines = S3-class.</li>
+    </ul>
+
+    <h2>CAP & PACELC</h2>
+    <ul>
+      <li><b>CAP</b>: under a network partition, choose Consistency or Availability — you can't have both.</li>
+      <li><b>PACELC</b>: even when there's no partition (Else), trade Latency vs Consistency.</li>
+      <li>Real systems are tunable per request (quorum reads/writes, read replicas, consistency levels).</li>
+    </ul>
+
+    <h2>Consistency models, from strong to weak</h2>
+    <ol>
+      <li><b>Linearizable</b> — appears as a single global timeline (etcd, single-leader writes).</li>
+      <li><b>Sequential</b> — all observers see the same order, not necessarily real-time.</li>
+      <li><b>Causal</b> — preserves cause-and-effect order (Dynamo with vector clocks).</li>
+      <li><b>Read-your-writes</b> — see your own writes immediately.</li>
+      <li><b>Monotonic reads</b> — never see time go backward.</li>
+      <li><b>Eventual</b> — replicas converge if writes stop.</li>
+    </ol>
+
+    <h2 data-cram="essential">Bottlenecks you'll be probed on</h2>
+    <ul>
+      <li><b>Hot keys</b> — one key gets disproportionate traffic. Mitigate with replication, key sharding (k:bucket), local caching.</li>
+      <li><b>Thundering herd</b> on cache miss — use singleflight, request coalescing, locking, jittered TTLs.</li>
+      <li><b>Cascading failures</b> — circuit breakers, bulkheads, load shedding, timeouts everywhere.</li>
+      <li><b>Tail latency</b> — hedged requests, redundant reads, isolating noisy neighbors.</li>
+      <li><b>Backpressure</b> — bounded queues, drop-newest vs drop-oldest, slow-start.</li>
+    </ul>
+
+    <h2>Reliability patterns</h2>
+    <ul>
+      <li>Timeouts → retries (with exponential backoff + jitter) → circuit breaker → fallback.</li>
+      <li>Idempotency keys for safe retries.</li>
+      <li>Health checks (liveness vs readiness).</li>
+      <li>Graceful shutdown: drain LB, finish in-flight, close.</li>
+      <li>Chaos testing: kill instances in staging, verify SLOs.</li>
+    </ul>
+
+    <h2>Observability</h2>
+    <ul>
+      <li><b>Metrics</b> (Prometheus): RED method (Rate, Errors, Duration) for services; USE (Utilization, Saturation, Errors) for resources.</li>
+      <li><b>Logs</b>: structured (JSON), with trace IDs propagated end-to-end.</li>
+      <li><b>Traces</b>: OpenTelemetry; sample ~1% in prod, 100% for errors.</li>
+      <li><b>SLI / SLO / SLA</b>: SLIs measured, SLOs targeted, SLAs contractual. Error budgets drive release decisions.</li>
+    </ul>
+
+    <h2>Security checklist (mention even if not asked)</h2>
+    <ul>
+      <li>TLS everywhere; mTLS internally.</li>
+      <li>AuthN (OIDC) vs AuthZ (RBAC/ABAC).</li>
+      <li>Secrets in a vault, rotate periodically.</li>
+      <li>Input validation + parameterized queries (SQLi).</li>
+      <li>Rate limiting + bot protection at the edge.</li>
+      <li>Encryption at rest (envelope encryption) + in transit.</li>
+      <li>Audit logs for sensitive actions.</li>
+    </ul>
+
+    <h2>Anti-patterns — what NOT to say</h2>
+    <ul>
+      <li>"Just add a cache." Caches add another consistency surface; explain invalidation, TTL, miss storms.</li>
+      <li>"Microservices for scale." Microservices solve <i>team</i> scale, not request scale, at the cost of operational overhead.</li>
+      <li>"We'll be eventually consistent." Eventually consistent <i>where</i>? Spell out the affected reads.</li>
+      <li>"Sharding fixes hot keys." Hot keys live within a shard; you need replication or load-aware splitting.</li>
+      <li>Drawing a diagram with no failure modes — every box and arrow has a fail mode.</li>
+      <li>Picking technologies without justifying with the requirements (no "pick Cassandra because scale").</li>
+    </ul>
+
+    <h2 data-cram="essential">Senior interviewer follow-ups</h2>
+    <table>
+      <thead><tr><th>Probe</th><th>What they want to hear</th></tr></thead>
+      <tbody>
+        <tr><td>"Walk me through what happens at 10x scale."</td><td>Identify next bottleneck (DB writes, cache memory, network), the mitigation (sharding, replication, queueing), and the new failure mode it introduces.</td></tr>
+        <tr><td>"How do you handle a noisy neighbor / hot key?"</td><td>Replicate hot keys to multiple replicas; key-bucket suffix; client-side caching; rate-limiting per key.</td></tr>
+        <tr><td>"What's your read latency budget?"</td><td>Pick a target (p99 ≤ X ms) and show the per-component allocation (LB 1 ms, app 10 ms, cache 0.5 ms, fallback DB 30 ms).</td></tr>
+        <tr><td>"What about cross-region?"</td><td>Active-active with conflict resolution OR active-passive with manual failover. RPO and RTO trade-offs.</td></tr>
+        <tr><td>"How do you roll out safely?"</td><td>Feature flags, canaries (1%, 10%, 50%, 100%), automatic rollback on SLO breach.</td></tr>
+        <tr><td>"How do you avoid a thundering herd?"</td><td>Singleflight, jittered TTLs, request coalescing at cache layer, stale-while-revalidate.</td></tr>
+        <tr><td>"Idempotency design?"</td><td>Client-supplied UUID per mutation; server stores result for N hours; same key → same response.</td></tr>
+        <tr><td>"How do you size a cache?"</td><td>Working-set estimation × hit-rate target. Smaller hot tier with eviction beats one giant cache.</td></tr>
+      </tbody>
+    </table>
+
+    <h2 data-cram="essential">Self-check</h2>
+    <ul class="checklist" data-key="system-design-check">
+      <li><input type="checkbox"/><span>I can drive a 45-min interview through the 7-step framework.</span></li>
+      <li><input type="checkbox"/><span>I know latency numbers (memory, SSD, DC RTT, cross-continent RTT) by heart.</span></li>
+      <li><input type="checkbox"/><span>I can do back-of-envelope QPS and storage estimates.</span></li>
+      <li><input type="checkbox"/><span>I can explain CAP and PACELC with a concrete example.</span></li>
+      <li><input type="checkbox"/><span>I can name 5 consistency models from strongest to weakest.</span></li>
+      <li><input type="checkbox"/><span>I can describe a thundering herd and 3 mitigations.</span></li>
+      <li><input type="checkbox"/><span>I can describe hot-key mitigation and load shedding.</span></li>
+      <li><input type="checkbox"/><span>I know how to design idempotent mutations.</span></li>
+      <li><input type="checkbox"/><span>I can explain SLI/SLO/SLA + error budgets.</span></li>
+      <li><input type="checkbox"/><span>I can describe RED and USE methods for monitoring.</span></li>
+      <li><input type="checkbox"/><span>I can outline a graceful-shutdown procedure.</span></li>
+      <li><input type="checkbox"/><span>I can describe canary rollouts and automatic rollback.</span></li>
+    </ul>
+
+    <div class="footer">Next → <a href="system-design-building-blocks.html">Building blocks</a></div>
+  </main>
+</div>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>

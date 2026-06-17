@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>System Design Case Studies — Go: Zero → Hero</title>
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar-root"></aside>
+  <main class="main">
+    <div class="crumbs"><a href="../index.html">Home</a> / System Design / Case Studies</div>
+    <section class="page-header">
+      <div>
+        <h1>System Design Case Studies</h1>
+        <p>Six end-to-end walkthroughs at the senior bar — capacity math, schemas, sequence diagrams (ASCII), trade-offs, and failure modes. Read one a day.</p>
+      </div>
+    </section>
+
+    <h2 data-cram="essential">Mental model</h2>
+    <ul>
+      <li><b>Six classic flavors</b>: URL shortener (write throughput + KV), rate limiter (atomicity in Redis), news feed (fan-out trade-off), real-time chat (long-lived connections + ordering), distributed cache (sharding + replication), search/typeahead (offline build + serve from RAM).</li>
+      <li><b>Pacing for 45 min</b>: 5 reqs · 5 capacity · 5 high-level · 10 data + APIs · 15 deep dives · 5 trade-offs/scale.</li>
+      <li><b>Always estimate first</b>; the math drives every later decision.</li>
+      <li><b>Always pick a sharding key with reasoning</b>; if you don't, the interviewer will probe.</li>
+    </ul>
+
+    <h2 data-cram="essential">How to read these</h2>
+    <ol>
+      <li>Cover the answer; spend 5 minutes drafting your own approach against the prompt.</li>
+      <li>Compare with the walkthrough — note where your design diverged.</li>
+      <li>Practice the verbal: 7-step framework, capacity math, then deep dive.</li>
+    </ol>
+
+    <!-- ============================================================== -->
+    <h2 data-cram="essential" id="url-shortener">1 · URL Shortener (TinyURL / bit.ly)</h2>
+    <h3>Requirements</h3>
+    <ul>
+      <li>POST /shorten {url} → short code. GET /{code} → 301 to long URL.</li>
+      <li>~100M new URLs/day, 10:1 read:write, 5-year retention, p99 redirect &lt; 50 ms global.</li>
+      <li>Codes must be short (~7 chars), unguessable enough, never collide.</li>
+    </ul>
+
+    <h3>Capacity</h3>
+<pre data-lang="go">writes_per_day := 100_000_000
+reads_per_day  := writes_per_day * 10        // 10^9
+avg_write_qps  := writes_per_day / 86_400    // ~1.2 k
+avg_read_qps   := reads_per_day  / 86_400    // ~12 k
+peak_read_qps  := avg_read_qps * 3           // ~36 k
+
+bytes_per_row  := 500                        // url + meta
+storage_5y     := writes_per_day * 365 * 5 * bytes_per_row // ~91 TB raw
+</pre>
+
+    <h3>API</h3>
+    <ul>
+      <li><code class="inline">POST /v1/urls</code> body <code class="inline">{url, custom?, ttl?}</code> → <code class="inline">{code, short_url}</code>. Idempotency-Key header.</li>
+      <li><code class="inline">GET /{code}</code> → 301 redirect (cacheable). 404 if expired/missing.</li>
+      <li><code class="inline">GET /v1/urls/{code}/stats</code> → click counts.</li>
+    </ul>
+
+    <h3>Code generation strategies</h3>
+    <table>
+      <thead><tr><th>Approach</th><th>Pros</th><th>Cons</th></tr></thead>
+      <tbody>
+        <tr><td>Auto-increment ID → base62</td><td>No collisions, sequential</td><td>Guessable; needs a single counter or sharded counters</td></tr>
+        <tr><td>Snowflake ID → base62</td><td>Distributed, time-ordered</td><td>Length grows; mildly guessable</td></tr>
+        <tr><td>Random 7-char + collision retry</td><td>Unguessable, simple</td><td>Collision check needs a fast read (Bloom filter helps)</td></tr>
+        <tr><td>Pre-generate code pool</td><td>Constant-time write</td><td>Background filler; ops complexity</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Architecture (ASCII)</h3>
+<pre data-lang="go">           +-------+    +--------+    +-----------+    +-----------+
+client --&gt; |  CDN  |--&gt;|   LB   |--&gt;|  shortenr  |--&gt;| Postgres  |
+           +-------+    +--------+    +-----+-----+    +-----------+
+                                            |  ^
+                                            v  |
+                                       +----+--+----+
+                                       |   Redis    |  (hot code -&gt; url)
+                                       +------------+
+                                            |
+                                            v
+                                       Kafka click stream -&gt; analytics
+</pre>
+
+    <h3>Data model</h3>
+<pre data-lang="go">CREATE TABLE urls (
+  code        VARCHAR(10) PRIMARY KEY,
+  long_url    TEXT        NOT NULL,
+  user_id     BIGINT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at  TIMESTAMPTZ
+);
+CREATE INDEX idx_urls_user_created ON urls(user_id, created_at DESC);
+</pre>
+
+    <h3>Read path</h3>
+    <ol>
+      <li>CDN: cache 301 by code for short TTL (e.g. 60 s) — absorbs hot codes globally.</li>
+      <li>App: <code class="inline">GET code</code> → Redis (LRU, ~95% hit) → Postgres on miss → fill cache.</li>
+      <li>Async: emit click event to Kafka (don't block redirect).</li>
+    </ol>
+
+    <h3>Trade-offs &amp; gotchas</h3>
+    <ul>
+      <li><b>Hot key</b> (viral link) — CDN + Redis absorb it; rate-limit obvious abuse.</li>
+      <li><b>Phishing</b> — moderation pipeline against URL safety APIs.</li>
+      <li><b>Custom slugs</b> — unique constraint; reserve namespace for vanity codes.</li>
+      <li><b>Analytics consistency</b> — at-least-once events; dedupe in the warehouse.</li>
+    </ul>
+
+    <!-- ============================================================== -->
+    <h2 data-cram="essential" id="rate-limiter">2 · Distributed Rate Limiter</h2>
+    <h3>Requirements</h3>
+    <ul>
+      <li>Per-API-key limits (e.g. 1000 req/min) across N stateless service nodes.</li>
+      <li>p99 limit-check &lt; 5 ms; correctness must survive single-node loss.</li>
+    </ul>
+
+    <h3>Algorithm choice</h3>
+    <ul>
+      <li><b>Token bucket</b> in Redis — allows bursts up to capacity; smooth refill.</li>
+      <li>Implement as a Lua script for atomicity (read state, refill, decide, write).</li>
+    </ul>
+<pre data-lang="go">-- KEYS[1] = bucket key; ARGV = capacity, refill_rate, now_ms, requested
+local b = redis.call('HMGET', KEYS[1], 'tokens', 'ts')
+local tokens = tonumber(b[1]) or tonumber(ARGV[1])
+local ts     = tonumber(b[2]) or tonumber(ARGV[3])
+local delta  = (tonumber(ARGV[3]) - ts) * tonumber(ARGV[2]) / 1000
+tokens = math.min(tonumber(ARGV[1]), tokens + delta)
+local req = tonumber(ARGV[4])
+local ok  = tokens &gt;= req
+if ok then tokens = tokens - req end
+redis.call('HMSET', KEYS[1], 'tokens', tokens, 'ts', ARGV[3])
+redis.call('PEXPIRE', KEYS[1], 60000)
+return ok and 1 or 0
+</pre>
+
+    <h3>Architecture</h3>
+<pre data-lang="go">  +-----------+   pre-filter   +-----------+
+  |  service  |---------------&gt;|   Redis   |  (1 round-trip per request)
+  +-----------+                +-----------+
+        |
+        v
+   downstream
+</pre>
+
+    <h3>Trade-offs</h3>
+    <ul>
+      <li><b>Hard limit</b> requires a single Redis primary per key — use consistent hashing across N shards.</li>
+      <li><b>Approx limit</b> via local token bucket + periodic sync (1–2% over-allow, much faster).</li>
+      <li><b>Failure mode</b> — Redis down: fail-open (allow + alert) or fail-closed (deny) by policy.</li>
+    </ul>
+
+    <!-- ============================================================== -->
+    <h2 data-cram="essential" id="news-feed">3 · News Feed (Twitter / Instagram timeline)</h2>
+    <h3>Requirements</h3>
+    <ul>
+      <li>200M DAU, p99 home-feed &lt; 200 ms, eventual consistency OK.</li>
+      <li>Average user follows ~200, top 0.1% follow &gt; 100k (celebrities).</li>
+    </ul>
+
+    <h3>The fan-out trade-off</h3>
+    <ul>
+      <li><b>Fan-out on write</b> (push): when A tweets, copy tweet ID to each follower's timeline. Fast reads, expensive writes for celebrities.</li>
+      <li><b>Fan-out on read</b> (pull): on read, query latest tweets from each followee, merge. Expensive reads, simple writes.</li>
+      <li><b>Hybrid (winner)</b>: push for normal users, pull for celebrities. Merge at read time.</li>
+    </ul>
+
+    <h3>Architecture</h3>
+<pre data-lang="go">post tweet --&gt; tweet svc --&gt; Kafka(tweets) --&gt; fanout workers --&gt; Redis(timelines)
+                                                  |
+                                                  +--&gt; (skip if celeb)
+read feed --&gt; feed svc --&gt; Redis(my timeline) ++ pull(celeb tweets) --&gt; merge --&gt; rank --&gt; cache
+</pre>
+
+    <h3>Storage</h3>
+    <ul>
+      <li><b>Tweets</b>: Cassandra/Scylla, partition by tweet_id (Snowflake), wide rows for retweets/replies.</li>
+      <li><b>Social graph</b>: dedicated graph store or Postgres for &lt; 1B edges.</li>
+      <li><b>Timelines</b>: Redis sorted set per user, capped at ~800 entries.</li>
+      <li><b>Media</b>: object store (S3) + CDN; tweets store URLs only.</li>
+    </ul>
+
+    <h3>Senior follow-ups</h3>
+    <ul>
+      <li><b>Ranking</b> — separate ranker service; features served from a feature store.</li>
+      <li><b>Cold cache</b> — pull from tweets store and warm Redis on first read.</li>
+      <li><b>Backfill</b> — when a user follows someone, async job inserts recent tweets into their timeline.</li>
+      <li><b>Deletes</b> — soft-delete in tweet store; timelines self-heal as old IDs roll off.</li>
+    </ul>
+
+    <!-- ============================================================== -->
+    <h2 id="chat">4 · Real-time Chat (WhatsApp / Slack)</h2>
+    <h3>Requirements</h3>
+    <ul>
+      <li>1B users, 50B msgs/day, 1:1 + group up to 1000, delivery &lt; 200 ms p99 same-region.</li>
+      <li>At-least-once delivery; ordering per conversation.</li>
+    </ul>
+
+    <h3>Architecture</h3>
+<pre data-lang="go">  client --(WebSocket/MQTT)--&gt; gateway (sticky) --&gt; chat svc --&gt; Kafka(conv_id)
+                                       ^                          |
+                                       |                          v
+                                       +-- presence/push       Cassandra(messages)
+</pre>
+
+    <h3>Key choices</h3>
+    <ul>
+      <li><b>Long-lived connection</b> per device → gateway holds (user_id, conn). Use consistent hashing for routing.</li>
+      <li><b>Partition key = conversation_id</b> in Kafka → preserves order per chat.</li>
+      <li><b>Storage</b>: Cassandra row per message, partition (conv_id, bucket=day), clustering by msg_id desc.</li>
+      <li><b>Offline delivery</b>: per-user inbox in KV with last_seen offset; client pulls deltas on reconnect.</li>
+      <li><b>Push notifications</b>: APNs/FCM via separate worker reading from Kafka.</li>
+    </ul>
+
+    <h3>Hard problems</h3>
+    <ul>
+      <li><b>Group fan-out at 1000 members</b> — write once to log, fan out to gateways via pub/sub; don't write 1000 inbox rows.</li>
+      <li><b>Read receipts &amp; typing</b> — ephemeral, broadcast through pub/sub, don't persist.</li>
+      <li><b>Encryption</b> — E2E with Signal protocol; server stores ciphertext only.</li>
+      <li><b>Multi-region</b> — pick a home region per conversation; replicate async; conflict resolution by msg_id.</li>
+    </ul>
+
+    <!-- ============================================================== -->
+    <h2 id="distributed-cache">5 · Distributed Cache (Memcached/Redis-cluster)</h2>
+    <h3>Requirements</h3>
+    <ul>
+      <li>1M ops/s, p99 &lt; 1 ms in same DC, 10 TB working set, eventual consistency on writes.</li>
+    </ul>
+
+    <h3>Design</h3>
+    <ul>
+      <li><b>Sharding</b> by consistent hashing with virtual nodes (200/node) for balance.</li>
+      <li><b>Replication</b> primary-secondary per shard; reads from primary by default, secondary for read-heavy keys.</li>
+      <li><b>Eviction</b> LRU per shard; allkeys-lru for cache use; volatile-lru if mixed TTL.</li>
+      <li><b>Client</b> picks shard via hash ring; reconnect on slot move.</li>
+    </ul>
+
+    <h3>Failure modes</h3>
+    <ul>
+      <li><b>Hot key</b> — replicate the key across N shards; client jitters reads.</li>
+      <li><b>Stampede</b> on miss — singleflight + jittered TTL + early-refresh at 80% TTL.</li>
+      <li><b>Node loss</b> — failover to secondary; rebalance moves only K/N keys (consistent hashing).</li>
+      <li><b>Split brain</b> — fence with a coordinator (etcd) holding shard ownership.</li>
+    </ul>
+
+    <h3>Capacity</h3>
+<pre data-lang="go">working_set     := 10 * (1 &lt;&lt; 40)            // 10 TB
+mem_per_node    := 64 * (1 &lt;&lt; 30)            // 64 GB
+shards          := working_set / mem_per_node // ~160
+nodes           := shards * 2                 // x2 for replication
+ops_per_node    := 1_000_000 / shards         // ~6k ops/s — well within Redis
+</pre>
+
+    <!-- ============================================================== -->
+    <h2 id="search">6 · Search Autocomplete (typeahead)</h2>
+    <h3>Requirements</h3>
+    <ul>
+      <li>Suggest top-10 completions for a prefix in &lt; 50 ms p99.</li>
+      <li>Update top-K daily from query logs; freshness OK at 1-day lag.</li>
+    </ul>
+
+    <h3>Design</h3>
+    <ul>
+      <li><b>Build phase</b> (offline): aggregate query logs by day → top-K per prefix → ship as a trie or Marisa-trie blob.</li>
+      <li><b>Serve phase</b>: in-memory trie per node (RAM cheap; tries compress well). Lookup = O(prefix length).</li>
+      <li><b>Cache</b> hot prefixes at the edge (CDN/Redis) with 5-minute TTL.</li>
+      <li><b>Personalization</b>: blend global top-K with per-user top-K at request time.</li>
+    </ul>
+
+    <h3>Architecture</h3>
+<pre data-lang="go">click logs --&gt; spark/flink --&gt; top-K aggregator --&gt; S3 trie blob
+                                                    |
+serve nodes load blob on rollout                    v
+client --&gt; LB --&gt; suggest svc(in-mem trie) --&gt; (cache miss?) --&gt; rebuild from blob
+</pre>
+
+    <h3>Trade-offs</h3>
+    <ul>
+      <li><b>Real-time freshness</b> — needs a streaming counter (Count-Min Sketch) → expensive but necessary for trends.</li>
+      <li><b>Misspellings</b> — BK-tree or Levenshtein automaton for fuzzy fallback.</li>
+      <li><b>Multilingual</b> — shard tries per locale; serve from nearest region.</li>
+    </ul>
+
+    <h2>Other classics worth practicing</h2>
+    <ul>
+      <li><b>Web crawler</b> — frontier (priority queue), URL dedupe (Bloom filter), politeness, robots.txt.</li>
+      <li><b>Notification system</b> — channel routing, retries, DLQ, user preferences.</li>
+      <li><b>Payment system</b> — idempotency, double-entry ledger, eventual consistency between services, reconciliation.</li>
+      <li><b>Ride-sharing</b> — geo-index (S2/H3), driver-rider match, surge pricing.</li>
+      <li><b>Video streaming</b> — chunked HLS/DASH, CDN, ABR ladder, encoding pipeline.</li>
+      <li><b>Metrics system</b> — Prometheus-style: scrape, time-series store, downsampling, alerting.</li>
+    </ul>
+
+    <h2 data-cram="essential">The verbal pacing (45-min slot)</h2>
+    <ol>
+      <li><b>0–5 min</b> — clarify requirements; write functional + non-functional on the board.</li>
+      <li><b>5–10 min</b> — capacity math; QPS, storage, bandwidth.</li>
+      <li><b>10–15 min</b> — high-level architecture; one box per service.</li>
+      <li><b>15–25 min</b> — data model + APIs; sharding key called out.</li>
+      <li><b>25–40 min</b> — pick 2 components and deep-dive (the part the interviewer leans into).</li>
+      <li><b>40–45 min</b> — failure modes, scaling to 10× / 100×, what you'd do differently with more time.</li>
+    </ol>
+
+    <div class="footer">Pair with → <a href="system-design.html">Fundamentals</a> · <a href="system-design-building-blocks.html">Building blocks</a> · <a href="microservices.html">Microservices</a></div>
+  </main>
+</div>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>

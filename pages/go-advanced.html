@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Advanced Go — Go: Zero → Hero</title>
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar-root"></aside>
+  <main class="main">
+    <div class="crumbs"><a href="../index.html">Home</a> / Go Language / Advanced</div>
+    <section class="page-header">
+      <div>
+        <h1>Advanced Go</h1>
+        <p>Memory model, escape analysis, GC, reflection, generics in depth, build flags, profiling — the senior-level material.</p>
+      </div>
+    </section>
+
+    <h2 data-cram="essential">Mental model</h2>
+    <ul>
+      <li><b>The compiler is your ally.</b> <code class="inline">-gcflags=-m</code> tells you what escaped to the heap; <code class="inline">go test -bench</code> + <code class="inline">pprof</code> tell you where the time really goes. Trust measurement, not intuition.</li>
+      <li><b>Garbage collection is concurrent and tri-color.</b> STW pauses are sub-millisecond; tail latency comes from GC <i>assist</i>, not from pauses. Allocation reduction is the main GC tuning lever.</li>
+      <li><b>The Go memory model is "happens-before" via synchronization events</b> — channels, mutexes, atomics, <code class="inline">sync.Once</code>, <code class="inline">go fn()</code>. Without one, no read is guaranteed to see another goroutine's write.</li>
+      <li><b>Reflection and <code class="inline">unsafe</code> exist for a reason but cost you type safety, speed, and clarity.</b> Reach for them last, behind small, documented seams.</li>
+    </ul>
+
+    <h2 data-cram="essential">Memory model in 60 seconds</h2>
+    <ul>
+      <li>A read of a variable is <em>not</em> guaranteed to observe the latest write from another goroutine without a synchronization event.</li>
+      <li>Synchronization events: channel send/receive, <code class="inline">sync.Mutex.Lock/Unlock</code>, <code class="inline">sync.Once.Do</code>, <code class="inline">atomic</code> ops, and <code class="inline">go fn()</code> happens-before fn's first instruction.</li>
+      <li>The race detector (<code class="inline">go test -race</code>) finds violations in code paths actually exercised — coverage matters.</li>
+    </ul>
+
+    <h2 data-cram="essential">Escape analysis & inlining</h2>
+<pre data-lang="go">// Compile with: go build -gcflags="-m -m" main.go
+func sum(xs []int) int {           // xs may stay on stack
+    s := 0
+    for _, x := range xs { s += x }
+    return s
+}
+
+func newUser() *User {             // *User escapes — returned pointer
+    return &amp;User{Name: "ada"}
+}
+</pre>
+    <ul>
+      <li>Returning a pointer to a local → escapes to heap.</li>
+      <li>Storing a value in an interface usually escapes (boxing).</li>
+      <li>Allocating slices/maps with size hints (<code class="inline">make([]T, 0, n)</code>) avoids growth churn.</li>
+    </ul>
+
+    <h2 data-cram="essential">Garbage collector</h2>
+    <ul>
+      <li>Concurrent, tri-color mark-sweep with write barriers. Non-generational, non-compacting.</li>
+      <li><code class="inline">GOGC</code> controls heap-growth target (default 100% = double live heap before next GC). Lower = more frequent, less RAM. <code class="inline">GOMEMLIMIT</code> (1.19+) sets a soft cap.</li>
+      <li>STW pauses are typically &lt;1ms; tail latency comes from assist work, not pauses.</li>
+    </ul>
+
+    <h2>Pointers, unsafe, atomics</h2>
+<pre data-lang="go">var hits atomic.Int64
+hits.Add(1)
+n := hits.Load()
+
+// CAS pattern
+for {
+    old := state.Load()
+    next := transform(old)
+    if state.CompareAndSwap(old, next) { break }
+}
+</pre>
+    <blockquote class="warn"><code class="inline">unsafe.Pointer</code> bypasses the type system. Allowed conversions are listed in the spec — anything else is undefined behavior. Avoid except for FFI and very-hot paths.</blockquote>
+
+    <h2>Reflection</h2>
+<pre data-lang="go">func walk(v any) {
+    rv := reflect.ValueOf(v)
+    if rv.Kind() == reflect.Pointer { rv = rv.Elem() }
+    for i := 0; i &lt; rv.NumField(); i++ {
+        f := rv.Type().Field(i)
+        fmt.Println(f.Name, f.Tag.Get("json"), rv.Field(i).Interface())
+    }
+}
+</pre>
+    <ul>
+      <li>Reflection is slow and loses type safety. Use it for serializers, ORMs, generic frameworks — not for business logic.</li>
+      <li>Prefer struct tags + code generation when possible.</li>
+    </ul>
+
+    <h2>Generics in depth</h2>
+<pre data-lang="go">// Constraint with both methods and type set
+type Stringer interface{ String() string }
+type Logger[T Stringer] struct{ items []T }
+func (l *Logger[T]) Add(v T) { l.items = append(l.items, v) }
+
+// Common helpers (avoid reinventing these — use golang.org/x/exp/slices, maps)
+func Map[A, B any](xs []A, f func(A) B) []B {
+    out := make([]B, len(xs))
+    for i, x := range xs { out[i] = f(x) }
+    return out
+}
+</pre>
+
+    <h2>Build, test, profile</h2>
+<pre data-lang="go">// Race detector
+go test -race ./...
+
+// Benchmarks
+func BenchmarkParse(b *testing.B) {
+    for i := 0; i &lt; b.N; i++ { _ = parse(input) }
+}
+go test -bench=. -benchmem -cpuprofile cpu.out -memprofile mem.out
+
+// Tracing
+import _ "net/http/pprof"  // exposes /debug/pprof/
+go tool pprof -http=:8080 cpu.out
+</pre>
+
+    <h2>Build constraints & embed</h2>
+<pre data-lang="go">//go:build linux &amp;&amp; amd64
+package metrics
+
+//go:embed templates/*.html
+var tmplFS embed.FS
+</pre>
+
+    <h2>Profiling — the muscle memory</h2>
+    <table>
+      <thead><tr><th>Symptom</th><th>Reach for</th></tr></thead>
+      <tbody>
+        <tr><td>"It's slow"</td><td>CPU profile (<code class="inline">-cpuprofile</code> or <code class="inline">/debug/pprof/profile</code>) → flame graph</td></tr>
+        <tr><td>"Memory keeps growing"</td><td>Heap profile (<code class="inline">-memprofile</code>, alloc_objects view) + <code class="inline">runtime.MemStats</code> over time</td></tr>
+        <tr><td>"Tail latency spikes"</td><td><code class="inline">runtime/trace</code> + execution tracer; look for GC assist, blocking syscalls, scheduler latency</td></tr>
+        <tr><td>"Goroutine count climbs"</td><td>Goroutine profile (<code class="inline">/debug/pprof/goroutine?debug=2</code>) → leaks</td></tr>
+        <tr><td>"Lock contention"</td><td><code class="inline">runtime.SetMutexProfileFraction</code> + <code class="inline">/debug/pprof/mutex</code></td></tr>
+        <tr><td>"Where do all the bytes come from?"</td><td>Heap alloc_space view + <code class="inline">benchstat</code> for benchmark deltas</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Anti-patterns — what NOT to say</h2>
+    <ul>
+      <li>"I'll just disable the GC." <code class="inline">GOGC=off</code> is a profiling tool, not a deployment strategy.</li>
+      <li>"<code class="inline">unsafe.Pointer</code> for speed." 99% of the time you're wrong, and the 1% should be measured against safe code.</li>
+      <li>"Reflection-based generic helpers" — Go 1.18 has actual generics. Use them.</li>
+      <li>"<code class="inline">sync.Pool</code> as a long-lived cache." Pooled values can be cleared at any GC cycle.</li>
+      <li>"Optimize first, measure later." A 10x improvement in a 1% function is a 0.1% improvement to the program.</li>
+      <li>Spawning a goroutine to "speed things up" without measurement — context switching and synchronization can dominate.</li>
+    </ul>
+
+    <h2 data-cram="essential">Senior interviewer follow-ups</h2>
+    <table>
+      <thead><tr><th>Probe</th><th>What they want to hear</th></tr></thead>
+      <tbody>
+        <tr><td>"What does <code class="inline">GOGC=200</code> mean?"</td><td>Trigger GC when heap doubles past previous live heap × 2 (= 200%). Less GC, more RAM.</td></tr>
+        <tr><td>"What's <code class="inline">GOMEMLIMIT</code> for?"</td><td>Soft cap on total Go memory (1.19+); GC works harder as you approach it. Best paired with a small <code class="inline">GOGC</code>.</td></tr>
+        <tr><td>"How do generics differ from C++ templates?"</td><td>Go uses <i>GC shape stenciling</i>: one specialization per memory shape, with itab-style dispatch for method calls. Less code-bloat than C++; some virtual-call cost.</td></tr>
+        <tr><td>"What does the race detector instrument?"</td><td>Memory accesses get vector-clock tags; concurrent unsynchronized access is flagged. Sound (no false positives), incomplete (only what runs).</td></tr>
+        <tr><td>"How do you reduce allocations in a hot path?"</td><td>Pre-size slices/maps, <code class="inline">strings.Builder</code>, <code class="inline">sync.Pool</code> for reusable buffers, value receivers for small structs, avoid interface boxing.</td></tr>
+        <tr><td>"What's an <code class="inline">itab</code>?"</td><td>The runtime descriptor that maps an interface's method set onto a concrete type's methods. Cached per (interface, concrete type) pair.</td></tr>
+        <tr><td>"How is panic propagated?"</td><td>Unwinds the stack running deferred functions; if a defer calls <code class="inline">recover()</code> it stops; otherwise it kills the process (or just the goroutine — but a panicking goroutine that isn't recovered crashes the whole program).</td></tr>
+      </tbody>
+    </table>
+
+    <h2 data-cram="essential">Senior topics & gotchas</h2>
+    <ul>
+      <li><b>Init order:</b> package-level vars, then <code class="inline">init()</code> functions, in import-dependency order. Keep init free of side-effects beyond plumbing.</li>
+      <li><b>Finalizers</b> exist (<code class="inline">runtime.SetFinalizer</code>) — almost never the right tool. Use explicit Close()+defer.</li>
+      <li><b>sync.Pool</b> reduces allocations for short-lived buffers (e.g. <code class="inline">bytes.Buffer</code> per request) — but pooled objects can be dropped at any GC.</li>
+      <li><b>Function inlining limits:</b> small leaf functions get inlined; defer used to disable inlining (no longer in modern Go).</li>
+      <li><b>Cgo</b> trades portability and stack semantics; each cgo call costs ~200ns and locks an OS thread. Avoid in hot paths.</li>
+    </ul>
+
+    <h2 data-cram="essential">Self-check</h2>
+    <ul class="checklist" data-key="go-advanced-check">
+      <li><input type="checkbox"/><span>I can read <code class="inline">-gcflags=-m</code> output and explain why a value escaped.</span></li>
+      <li><input type="checkbox"/><span>I can describe a tri-color GC cycle and the role of write barriers.</span></li>
+      <li><input type="checkbox"/><span>I know when to reach for atomics, <code class="inline">sync.Pool</code>, and when not to.</span></li>
+      <li><input type="checkbox"/><span>I can write a benchmark, capture a CPU/heap profile, and read flame graphs.</span></li>
+      <li><input type="checkbox"/><span>I know what <code class="inline">GOGC</code> and <code class="inline">GOMEMLIMIT</code> do and when each helps.</span></li>
+      <li><input type="checkbox"/><span>I understand the Go memory model and the role of synchronization events.</span></li>
+      <li><input type="checkbox"/><span>I can use the runtime/trace tool to find scheduler/GC tail latency.</span></li>
+      <li><input type="checkbox"/><span>I know when generics earn their keep vs interfaces.</span></li>
+      <li><input type="checkbox"/><span>I can find a goroutine leak using <code class="inline">pprof goroutine</code>.</span></li>
+      <li><input type="checkbox"/><span>I can explain the cgo cost and avoid it in hot paths.</span></li>
+    </ul>
+
+    <div class="footer">Next → <a href="concurrency.html">Concurrency</a></div>
+  </main>
+</div>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>

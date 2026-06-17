@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Last-Minute Cheatsheet — Go: Zero → Hero</title>
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar-root"></aside>
+  <main class="main">
+    <div class="crumbs"><a href="../index.html">Home</a> / Last-minute cheatsheet</div>
+    <section class="page-header">
+      <div>
+        <h1>🔥 Last-Minute Cheatsheet</h1>
+        <p>Everything you need on one page the night (or the hour) before. Complexities, templates, system-design numbers, Go gotchas. Print it. Skim it. Walk in calm.</p>
+      </div>
+    </section>
+
+    <h2 data-cram="essential">1 · Complexity table for the structures you'll mention</h2>
+    <table>
+      <thead><tr><th>Structure</th><th>Access</th><th>Search</th><th>Insert</th><th>Delete</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>Array / slice</td><td>O(1)</td><td>O(n)</td><td>O(1) amort. append</td><td>O(n)</td><td>append doubles cap</td></tr>
+        <tr><td>Hash map</td><td>—</td><td>O(1) avg</td><td>O(1) avg</td><td>O(1) avg</td><td>worst O(n) on adversarial keys</td></tr>
+        <tr><td>Linked list</td><td>O(n)</td><td>O(n)</td><td>O(1)</td><td>O(1)</td><td>given the node ptr</td></tr>
+        <tr><td>Binary heap</td><td>O(1) top</td><td>O(n)</td><td>O(log n)</td><td>O(log n)</td><td>container/heap</td></tr>
+        <tr><td>BST balanced</td><td>O(log n)</td><td>O(log n)</td><td>O(log n)</td><td>O(log n)</td><td>not in stdlib</td></tr>
+        <tr><td>Trie</td><td>—</td><td>O(L)</td><td>O(L)</td><td>O(L)</td><td>L = key length</td></tr>
+        <tr><td>Union-Find</td><td>—</td><td>—</td><td>—</td><td>—</td><td>~O(α(n)) per op</td></tr>
+        <tr><td>Fenwick / BIT</td><td>—</td><td>O(log n)</td><td>O(log n)</td><td>—</td><td>prefix sums</td></tr>
+        <tr><td>Segment tree</td><td>—</td><td>O(log n)</td><td>O(log n)</td><td>O(log n)</td><td>range query/update</td></tr>
+      </tbody>
+    </table>
+
+    <h2 data-cram="essential">2 · Pattern → Tool flash table</h2>
+    <table>
+      <thead><tr><th>Signal</th><th>Pattern</th></tr></thead>
+      <tbody>
+        <tr><td>Sorted array, pair</td><td>Two pointers</td></tr>
+        <tr><td>Longest/shortest contiguous with constraint</td><td>Sliding window</td></tr>
+        <tr><td>Subarray sum = K</td><td>Prefix sum + hashmap</td></tr>
+        <tr><td>Next greater / smaller</td><td>Monotonic stack</td></tr>
+        <tr><td>Max/min in window</td><td>Monotonic deque</td></tr>
+        <tr><td>k-th smallest streaming</td><td>Heap of size k</td></tr>
+        <tr><td>k-th smallest one-shot</td><td>Quickselect</td></tr>
+        <tr><td>Cycle / middle of list</td><td>Fast &amp; slow ptrs</td></tr>
+        <tr><td>Find dup/missing in [1..n]</td><td>Cyclic sort / negate</td></tr>
+        <tr><td>Interval merge</td><td>Sort by start, sweep</td></tr>
+        <tr><td>Shortest unweighted</td><td>BFS</td></tr>
+        <tr><td>Shortest non-neg weighted</td><td>Dijkstra (heap)</td></tr>
+        <tr><td>Topo / build order</td><td>Kahn / DFS post-order</td></tr>
+        <tr><td>Connected / merge groups</td><td>Union-Find</td></tr>
+        <tr><td>Prefix / autocomplete</td><td>Trie</td></tr>
+        <tr><td>Count ways / min cost</td><td>DP</td></tr>
+        <tr><td>Smallest x such that P(x)</td><td>Binary search on answer</td></tr>
+        <tr><td>Generate all / enumerate</td><td>Backtracking</td></tr>
+        <tr><td>n ≤ 20, choose subset</td><td>Bitmask DP</td></tr>
+      </tbody>
+    </table>
+
+    <h2 data-cram="essential">3 · Go templates you must be able to type from memory</h2>
+
+    <h3>Sliding window</h3>
+<pre data-lang="go">l := 0; best := 0; freq := map[byte]int{}
+for r := 0; r &lt; len(s); r++ {
+    freq[s[r]]++
+    for /* invalid */ {
+        freq[s[l]]--; if freq[s[l]] == 0 { delete(freq, s[l]) }
+        l++
+    }
+    if r-l+1 &gt; best { best = r - l + 1 }
+}
+return best
+</pre>
+
+    <h3>Binary search (lower-bound idiom)</h3>
+<pre data-lang="go">lo, hi := 0, len(a) // search in [lo, hi)
+for lo &lt; hi {
+    mid := lo + (hi-lo)/2
+    if a[mid] &lt; target { lo = mid + 1 } else { hi = mid }
+}
+// lo == first index with a[lo] &gt;= target (or len(a))
+</pre>
+
+    <h3>BFS (graph / grid)</h3>
+<pre data-lang="go">q := []int{src}
+seen := map[int]bool{src: true}
+for len(q) &gt; 0 {
+    u := q[0]; q = q[1:]
+    for _, v := range adj[u] {
+        if seen[v] { continue }
+        seen[v] = true
+        q = append(q, v)
+    }
+}
+</pre>
+
+    <h3>DFS with stack</h3>
+<pre data-lang="go">stack := []int{src}; seen := map[int]bool{src:true}
+for len(stack) &gt; 0 {
+    u := stack[len(stack)-1]; stack = stack[:len(stack)-1]
+    for _, v := range adj[u] {
+        if !seen[v] { seen[v]=true; stack = append(stack, v) }
+    }
+}
+</pre>
+
+    <h3>Dijkstra</h3>
+<pre data-lang="go">dist := make([]int, n)
+for i := range dist { dist[i] = math.MaxInt }
+dist[src] = 0
+pq := &amp;MinHeap{{0, src}}
+heap.Init(pq)
+for pq.Len() &gt; 0 {
+    cur := heap.Pop(pq).(Item)
+    if cur.d &gt; dist[cur.v] { continue }
+    for _, e := range adj[cur.v] {
+        if nd := cur.d + e.w; nd &lt; dist[e.to] {
+            dist[e.to] = nd
+            heap.Push(pq, Item{nd, e.to})
+        }
+    }
+}
+</pre>
+
+    <h3>Union-Find</h3>
+<pre data-lang="go">type DSU struct{ p, r []int }
+func NewDSU(n int) *DSU { p := make([]int, n); for i := range p { p[i]=i }; return &amp;DSU{p, make([]int, n)} }
+func (d *DSU) Find(x int) int { if d.p[x] != x { d.p[x] = d.Find(d.p[x]) }; return d.p[x] }
+func (d *DSU) Union(a, b int) bool {
+    a, b = d.Find(a), d.Find(b)
+    if a == b { return false }
+    if d.r[a] &lt; d.r[b] { a, b = b, a }
+    d.p[b] = a
+    if d.r[a] == d.r[b] { d.r[a]++ }
+    return true
+}
+</pre>
+
+    <h3>Backtracking skeleton</h3>
+<pre data-lang="go">var res [][]int
+var cur []int
+var dfs func(start int)
+dfs = func(start int) {
+    res = append(res, append([]int(nil), cur...))
+    for i := start; i &lt; len(nums); i++ {
+        cur = append(cur, nums[i])
+        dfs(i + 1)
+        cur = cur[:len(cur)-1]
+    }
+}
+dfs(0)
+</pre>
+
+    <h3>Top-K with min-heap</h3>
+<pre data-lang="go">h := &amp;MinHeap{}; heap.Init(h)
+for _, x := range nums {
+    heap.Push(h, x)
+    if h.Len() &gt; k { heap.Pop(h) }
+}
+// h now holds the k largest; root is the k-th largest
+</pre>
+
+    <h3>0/1 Knapsack (1D)</h3>
+<pre data-lang="go">dp := make([]int, W+1)
+for i := range w {
+    for c := W; c &gt;= w[i]; c-- {
+        if v := dp[c-w[i]] + val[i]; v &gt; dp[c] { dp[c] = v }
+    }
+}
+return dp[W]
+</pre>
+
+    <h2 data-cram="essential">4 · Go gotchas you must NOT trip on</h2>
+    <ul>
+      <li><b>Loop variable capture</b> (pre-1.22): closures over <code class="inline">for i,v := range</code> share <code class="inline">i,v</code>. Shadow with <code class="inline">i,v := i,v</code>.</li>
+      <li><b>Append aliasing</b>: if cap &gt; len, append mutates the shared backing array. Reassign always.</li>
+      <li><b>Nil interface ≠ typed nil pointer</b>. <code class="inline">var p *T = nil; var i I = p; i == nil // false</code>.</li>
+      <li><b>Map writes are not safe</b> — concurrent map writes panic. Use <code class="inline">sync.Map</code> or a Mutex.</li>
+      <li><b>Range over map is unordered</b> — randomized per iteration.</li>
+      <li><b>Channels</b>: send on closed → panic. Receive on closed → zero, ok=false. Close once, by sender.</li>
+      <li><b>defer evaluates args at defer-time</b>; the call runs at return.</li>
+      <li><b>Always pass <code class="inline">context.Context</code> as the first arg</b> after the receiver.</li>
+      <li><b>Errors</b>: wrap with <code class="inline">%w</code>, compare with <code class="inline">errors.Is</code>/<code class="inline">errors.As</code>. Don't return generic <code class="inline">"error"</code> strings.</li>
+      <li><b>time.After leaks</b> in selects until the timer fires — use <code class="inline">time.NewTimer</code> + Stop in hot paths.</li>
+    </ul>
+
+    <h2 data-cram="essential">5 · Concurrency one-liners</h2>
+    <ul>
+      <li><b>WaitGroup</b>: <code class="inline">wg.Add(1); go func(){ defer wg.Done(); ... }(); wg.Wait()</code>.</li>
+      <li><b>Errgroup</b>: <code class="inline">g, ctx := errgroup.WithContext(ctx); g.Go(...); err := g.Wait()</code>.</li>
+      <li><b>Worker pool</b>: jobs chan in, results chan out, N goroutines, close jobs to stop.</li>
+      <li><b>Timeout</b>: <code class="inline">ctx, cancel := context.WithTimeout(parent, 2*time.Second); defer cancel()</code>.</li>
+      <li><b>Single-flight</b>: <code class="inline">singleflight.Group</code> dedupes concurrent identical fetches.</li>
+      <li><b>Rate limit</b>: <code class="inline">rate.NewLimiter(rate.Limit(qps), burst)</code> from <code class="inline">x/time/rate</code>.</li>
+    </ul>
+
+    <h2 data-cram="essential">6 · System-design numbers (back-of-envelope)</h2>
+    <table>
+      <thead><tr><th>Operation</th><th>Latency</th></tr></thead>
+      <tbody>
+        <tr><td>L1 / L2 cache</td><td>~1 / 4 ns</td></tr>
+        <tr><td>Main memory</td><td>~100 ns</td></tr>
+        <tr><td>SSD random read 4 KB</td><td>~150 µs</td></tr>
+        <tr><td>Same-DC RTT</td><td>~0.5 ms</td></tr>
+        <tr><td>SSD seq read 1 MB</td><td>~1 ms</td></tr>
+        <tr><td>HDD seek</td><td>~10 ms</td></tr>
+        <tr><td>Cross-continent RTT</td><td>~150 ms</td></tr>
+      </tbody>
+    </table>
+    <ul>
+      <li><b>QPS recipe</b>: DAU × reqs/user/day ÷ 86 400 = avg QPS. Peak ≈ 3× avg.</li>
+      <li><b>Storage</b>: events/day × bytes/event × retention × replication.</li>
+      <li><b>Availability</b>: 3 nines = 8.76 h/yr down · 4 nines = 52 m · 5 nines = 5 m.</li>
+      <li><b>Single Redis node</b>: ~100 k ops/s. <b>Single Postgres</b>: ~10 k tx/s on commodity. <b>Kafka broker</b>: ~100 MB/s/topic.</li>
+    </ul>
+
+    <h2>7 · The 7-step system-design framework</h2>
+    <ol>
+      <li><b>Requirements</b> — functional + non-functional (latency, availability, durability, consistency, scale).</li>
+      <li><b>Capacity</b> — QPS, storage, bandwidth, working set.</li>
+      <li><b>API</b> — REST/gRPC, idempotency keys, pagination.</li>
+      <li><b>Architecture</b> — client → LB → service → cache → DB → async pipeline.</li>
+      <li><b>Data model</b> — schemas, indexes, DB choice, sharding key.</li>
+      <li><b>Deep dives</b> — pick 2–3 components, stress-test (hotspots, failure modes, observability).</li>
+      <li><b>Trade-offs &amp; follow-ups</b> — 100× scale? Cross-region? Cost?</li>
+    </ol>
+
+    <h2>8 · Distributed-systems vocabulary you'll be asked</h2>
+    <ul>
+      <li><b>CAP</b> — under partition, choose Consistency or Availability. <b>PACELC</b> — even without partition, choose Latency or Consistency.</li>
+      <li><b>Quorum</b>: R+W &gt; N gives strong consistency on Dynamo-style systems.</li>
+      <li><b>Consistent hashing</b> with virtual nodes — only K/N keys move when adding/removing a node.</li>
+      <li><b>Idempotency</b> — client supplies a key, server stores (key → result) with TTL.</li>
+      <li><b>Outbox</b> — atomic DB write + relay → broker for at-least-once events without 2PC.</li>
+      <li><b>Saga</b> — local txns + compensations; orchestrated (Temporal) or choreographed (events).</li>
+      <li><b>CQRS / event sourcing</b> — split read/write models; state = fold(events).</li>
+      <li><b>Backpressure</b> — bounded queues; slow producers when consumers lag.</li>
+      <li><b>Bulkhead</b> — isolate resource pools so one failure can't drown the whole service.</li>
+      <li><b>Circuit breaker</b> — fail fast for a window after repeated failures; half-open to probe.</li>
+    </ul>
+
+    <h2>9 · Cache patterns and invalidation</h2>
+    <ul>
+      <li><b>Cache-aside</b> — app reads cache, misses → DB → fill cache. Simple, default choice.</li>
+      <li><b>Read-through</b> — cache library handles miss/load. Encapsulated.</li>
+      <li><b>Write-through</b> — write to cache + DB synchronously. Strong consistency, slower writes.</li>
+      <li><b>Write-back</b> — write to cache, flush async. Risk of data loss on crash.</li>
+      <li><b>Stampede protection</b> — singleflight, request coalescing, jittered TTLs, pre-warm.</li>
+      <li><b>Eviction</b> — LRU default; LFU for hot-key heavy; TTL for time-bounded data.</li>
+    </ul>
+
+    <h2>10 · Rate limiting algorithms (one-liners)</h2>
+    <ul>
+      <li><b>Token bucket</b> — refill r/s up to capacity B; allow if token available. Permits bursts.</li>
+      <li><b>Leaky bucket</b> — fixed drain rate; smooths output but no bursts.</li>
+      <li><b>Fixed window</b> — counter per minute. Simple but allows 2× burst at boundary.</li>
+      <li><b>Sliding window log</b> — exact, O(N) memory per key.</li>
+      <li><b>Sliding window counter</b> — interpolation between two fixed windows. Good balance.</li>
+      <li>Distributed → Redis with Lua script for atomicity.</li>
+    </ul>
+
+    <h2>11 · Database one-liners</h2>
+    <ul>
+      <li><b>SQL</b> — relations, transactions, joins, schema. Use first; only leave if you must.</li>
+      <li><b>Document (Mongo)</b> — flexible schema, embedded docs, weaker txns.</li>
+      <li><b>KV (Redis, Dynamo)</b> — O(1) by key, no joins; pick partition key carefully.</li>
+      <li><b>Wide column (Cassandra, ScyllaDB)</b> — write-heavy, tunable consistency, time-series.</li>
+      <li><b>Search (Elastic, OpenSearch)</b> — inverted index; near-real-time, not source of truth.</li>
+      <li><b>Graph (Neo4j)</b> — many-hop traversals; relationships are first-class.</li>
+      <li><b>Indexes</b> — speed reads, slow writes; B-tree default; covering index avoids row lookup.</li>
+      <li><b>Isolation</b> — Read committed → Repeatable read → Snapshot → Serializable.</li>
+    </ul>
+
+    <h2 data-cram="essential">12 · Last-30-minutes checklist</h2>
+    <ul class="checklist" data-key="cheatsheet:final">
+      <li><input type="checkbox" /><span>Skim the pattern → tool table above.</span></li>
+      <li><input type="checkbox" /><span>Type the BFS / DFS / binary-search templates by hand once.</span></li>
+      <li><input type="checkbox" /><span>Recite Go gotchas out loud (loop capture, nil interface, append aliasing).</span></li>
+      <li><input type="checkbox" /><span>Glance at latency numbers; commit "memory ≈ 100× SSD ≈ 10⁴× cross-DC" to memory.</span></li>
+      <li><input type="checkbox" /><span>Open the <a href="flashcards.html">flashcards</a>, run 10 random ones.</span></li>
+      <li><input type="checkbox" /><span>Drink water. Bathroom. Mic check. You've got this.</span></li>
+    </ul>
+
+    <div class="footer">Pair with → <a href="leetcode-tricks.html">LeetCode tricks</a> · <a href="flashcards.html">Flashcards</a></div>
+  </main>
+</div>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>

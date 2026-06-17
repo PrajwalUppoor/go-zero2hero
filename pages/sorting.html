@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sorting — Go: Zero → Hero</title>
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar-root"></aside>
+  <main class="main">
+    <div class="crumbs"><a href="../index.html">Home</a> / Patterns / Sorting</div>
+    <section class="page-header">
+      <div>
+        <h1>Sorting</h1>
+        <p>Knowing when <em>not</em> to sort is half the battle. Master quickselect, counting/radix sort, custom comparators, and stable vs unstable trade-offs.</p>
+      </div>
+    </section>
+
+    <h2 data-cram="essential">Mental model</h2>
+    <ul>
+      <li><b>Sorting is rarely the goal — it's a setup.</b> Ask: do I really need a total order, or just the top-K, the median, partitioning, or counting?</li>
+      <li><b>Time floor</b>: comparison-based sorting is Ω(n log n). Counting / radix beat it when the value range is small or the data is digit-limited.</li>
+      <li><b>Stable when ties matter</b>; unstable otherwise (it's faster).</li>
+      <li><b>For top-K</b>: heap of K (streaming), or quickselect (offline). Don't sort the whole array.</li>
+      <li><b>Custom comparators</b>: in Go, return <code class="inline">int</code> from <code class="inline">slices.SortFunc</code> (negative / zero / positive) or <code class="inline">bool</code> from <code class="inline">sort.Slice</code>'s <i>less</i>.</li>
+    </ul>
+
+    <h2 data-cram="essential">Go standard library</h2>
+<pre data-lang="go">sort.Ints(a)
+sort.Strings(ss)
+sort.Slice(items, func(i, j int) bool { return items[i].x &lt; items[j].x })
+sort.SliceStable(items, less)        // preserves relative order of equals
+sort.Sort(sort.Reverse(sort.IntSlice(a)))
+
+// generics (1.21+)
+slices.Sort(a)
+slices.SortFunc(items, func(a, b Item) int { return cmp.Compare(a.x, b.x) })
+</pre>
+    <ul>
+      <li><code class="inline">sort.Slice</code>/<code class="inline">slices.Sort</code> use pattern-defeating quicksort (pdqsort) — O(n log n) worst case in modern Go.</li>
+      <li>Use <code class="inline">SortStable</code> only when ties matter; it's slightly slower.</li>
+    </ul>
+
+    <h2>Counting sort (small integer range)</h2>
+<pre data-lang="go">// O(n + k). Use when values are bounded (e.g. 0..1000).
+func countingSort(a []int, k int) {
+    c := make([]int, k+1)
+    for _, v := range a { c[v]++ }
+    i := 0
+    for v, cnt := range c {
+        for ; cnt &gt; 0; cnt-- { a[i] = v; i++ }
+    }
+}
+</pre>
+
+    <h2>Quickselect — k-th smallest in average O(n)</h2>
+<pre data-lang="go">func quickselect(a []int, k int) int {  // k is 0-indexed
+    lo, hi := 0, len(a)-1
+    for lo &lt; hi {
+        p := partition(a, lo, hi)
+        if p == k { return a[p] }
+        if p &lt; k { lo = p + 1 } else { hi = p - 1 }
+    }
+    return a[lo]
+}
+func partition(a []int, lo, hi int) int {
+    pivot := a[hi]
+    i := lo
+    for j := lo; j &lt; hi; j++ {
+        if a[j] &lt; pivot { a[i], a[j] = a[j], a[i]; i++ }
+    }
+    a[i], a[hi] = a[hi], a[i]
+    return i
+}
+</pre>
+    <blockquote class="warn">Quickselect's worst case is O(n²). Randomize the pivot or use median-of-three to avoid attacker-chosen inputs.</blockquote>
+
+    <h2>Merge sort (used in linked-list sort, count inversions)</h2>
+<pre data-lang="go">func mergeSort(a []int) []int {
+    if len(a) &lt; 2 { return a }
+    m := len(a) / 2
+    l := mergeSort(append([]int(nil), a[:m]...))
+    r := mergeSort(append([]int(nil), a[m:]...))
+    return merge(l, r)
+}
+</pre>
+
+    <h2>When to pick which sort</h2>
+    <table>
+      <thead><tr><th>Need</th><th>Pick</th></tr></thead>
+      <tbody>
+        <tr><td>General comparison sort</td><td><code class="inline">sort.Slice</code> / <code class="inline">slices.Sort</code></td></tr>
+        <tr><td>k-th element only</td><td>Quickselect / heap-of-k</td></tr>
+        <tr><td>Bounded integers</td><td>Counting / radix sort</td></tr>
+        <tr><td>Stable order needed</td><td><code class="inline">SortStable</code> / merge sort</td></tr>
+        <tr><td>Streaming top-K</td><td>Min-heap of size K</td></tr>
+        <tr><td>External / disk-resident</td><td>External merge sort, k-way merge</td></tr>
+      </tbody>
+    </table>
+
+    <h2 data-cram="essential">Classic problems</h2>
+    <table>
+      <thead><tr><th>Problem</th><th>Idea</th><th>Time</th></tr></thead>
+      <tbody>
+        <tr><td>Sort Colors</td><td>Dutch flag (3-way partition)</td><td>O(n) / O(1)</td></tr>
+        <tr><td>Merge Intervals</td><td>Sort by start, merge in pass</td><td>O(n log n)</td></tr>
+        <tr><td>Insert Interval</td><td>Binary search insertion + merge</td><td>O(n)</td></tr>
+        <tr><td>Meeting Rooms II</td><td>Heap of end times</td><td>O(n log n)</td></tr>
+        <tr><td>Largest Number</td><td>Custom <code class="inline">a+b &gt; b+a</code></td><td>O(n log n)</td></tr>
+        <tr><td>Wiggle Sort II</td><td>Median + virtual indexing</td><td>O(n)</td></tr>
+        <tr><td>K-th Largest / Smallest</td><td>Quickselect or min-heap</td><td>O(n) avg</td></tr>
+        <tr><td>Top K Frequent Elements</td><td>Bucket sort by freq</td><td>O(n)</td></tr>
+        <tr><td>Count of Smaller Numbers After Self</td><td>Merge-sort with index / BIT</td><td>O(n log n)</td></tr>
+        <tr><td>Reverse Pairs / Count Inversions</td><td>Merge sort with cross-count</td><td>O(n log n)</td></tr>
+        <tr><td>H-Index</td><td>Sort or counting sort</td><td>O(n)</td></tr>
+        <tr><td>Custom Sort String</td><td>Index map + stable sort</td><td>O(n)</td></tr>
+        <tr><td>Sort Almost-Sorted (k-displaced)</td><td>Heap of size k+1</td><td>O(n log k)</td></tr>
+        <tr><td>External Sort (huge file)</td><td>Chunk + merge with k-way heap</td><td>O(n log n) disk</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Anti-patterns — what NOT to say</h2>
+    <ul>
+      <li>"Sort and pick K-th." That's O(n log n) when O(n) average is possible (quickselect, bucket).</li>
+      <li>Comparator that doesn't define a total order — produces undefined behavior, not just wrong order.</li>
+      <li>Stable sort by reflex when ties don't matter (slower).</li>
+      <li>In-place sorting a slice you've sub-sliced — original gets reordered too.</li>
+      <li>Sorting strings with byte comparison when you need locale / Unicode order — use <code class="inline">golang.org/x/text/collate</code>.</li>
+    </ul>
+
+    <h2 data-cram="essential">Senior interviewer follow-ups</h2>
+    <table>
+      <thead><tr><th>Probe</th><th>What they want to hear</th></tr></thead>
+      <tbody>
+        <tr><td>"How would you sort 100GB of integers on a 16GB machine?"</td><td>External merge sort: chunk into RAM-sized runs, sort, write to disk, k-way merge with a heap.</td></tr>
+        <tr><td>"Why O(n log n) lower bound for comparison sorts?"</td><td>Decision tree must distinguish n! permutations; tree depth ≥ log₂(n!) ≈ n log n.</td></tr>
+        <tr><td>"When is radix sort better than quicksort?"</td><td>Small fixed-width integers / strings; very large n. Constant factor matters.</td></tr>
+        <tr><td>"Quickselect's worst case?"</td><td>O(n²). Use randomized or median-of-medians pivot for guaranteed O(n).</td></tr>
+        <tr><td>"How do you sort an immutable input?"</td><td>Sort a slice of indices via custom less-fn that reads the input.</td></tr>
+        <tr><td>"Find K closest points to origin in O(n) avg?"</td><td>Quickselect on squared distance; or bucket sort if range is known.</td></tr>
+        <tr><td>"Stable vs unstable — which does Go use?"</td><td>Pdqsort (unstable) for <code class="inline">sort.Slice</code>; <code class="inline">sort.SliceStable</code> for stable.</td></tr>
+      </tbody>
+    </table>
+
+    <h2 data-cram="essential">Self-check</h2>
+    <ul class="checklist" data-key="sorting-check">
+      <li><input type="checkbox"/><span>I can pick the right sort for: top-K stream, k-th largest, sort 1B integers, sort by custom comparator.</span></li>
+      <li><input type="checkbox"/><span>I can write quickselect with average O(n) and explain its O(n²) worst case.</span></li>
+      <li><input type="checkbox"/><span>I can write counting/bucket sort and know when each beats quicksort.</span></li>
+      <li><input type="checkbox"/><span>I can sketch external merge sort for files larger than RAM.</span></li>
+      <li><input type="checkbox"/><span>I can implement Dutch flag for 3-way partitioning.</span></li>
+      <li><input type="checkbox"/><span>I can use <code class="inline">slices.SortFunc</code> with a 3-way comparator.</span></li>
+      <li><input type="checkbox"/><span>I know stable vs unstable and pick consciously.</span></li>
+      <li><input type="checkbox"/><span>I can implement count of inversions via merge sort.</span></li>
+      <li><input type="checkbox"/><span>I can solve Largest Number with the <code class="inline">a+b vs b+a</code> trick.</span></li>
+      <li><input type="checkbox"/><span>I know that <code class="inline">sort.Search</code> exists for "first index where predicate is true".</span></li>
+    </ul>
+
+    <div class="footer">Next → <a href="linked-lists.html">Linked lists</a></div>
+  </main>
+</div>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>

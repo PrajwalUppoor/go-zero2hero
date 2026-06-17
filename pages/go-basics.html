@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Go Fundamentals — Go: Zero → Hero</title>
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar-root"></aside>
+  <main class="main">
+    <div class="crumbs"><a href="../index.html">Home</a> / Go Language / Fundamentals</div>
+    <section class="page-header">
+      <div>
+        <h1>Go Fundamentals</h1>
+        <p>Everything a senior backend engineer must internalize before touching channels: types, slices, maps, structs, methods, interfaces, errors, and modules.</p>
+      </div>
+    </section>
+
+    <h2 data-cram="essential">Mental model</h2>
+    <ul>
+      <li><b>Statically typed, compiled, garbage-collected</b> language with first-class concurrency. The compiler is fast, the runtime is small, the binary is single.</li>
+      <li><b>Composition over inheritance.</b> No classes, no inheritance — interfaces are satisfied implicitly. <code class="inline">struct + methods + interface</code> is the whole object system.</li>
+      <li><b>Errors are values</b>, not exceptions. <code class="inline">panic</code> is for programmer bugs only, never for control flow.</li>
+      <li><b>Zero values are useful.</b> A freshly-declared struct, slice, or map is a <i>working</i> empty thing, not nil-pointer minefield (with two exceptions: maps and channels need <code class="inline">make</code> for writes).</li>
+      <li><b>The standard library is the framework.</b> <code class="inline">net/http</code>, <code class="inline">encoding/json</code>, <code class="inline">database/sql</code>, <code class="inline">context</code>, <code class="inline">testing</code>, <code class="inline">log/slog</code> are first-rate; reach for third-party only when you need extras.</li>
+    </ul>
+
+    <h2>1. Modules & project layout</h2>
+<pre data-lang="go">// go.mod is the unit of versioning. Always pin Go and module path.
+module github.com/acme/billing
+
+go 1.22
+
+require (
+    github.com/google/uuid v1.6.0
+    go.uber.org/zap v1.27.0
+)
+</pre>
+    <ul>
+      <li>Module path == import path. Public packages live under that path; <code class="inline">internal/</code> is enforced by the compiler.</li>
+      <li>Canonical layout: <code class="inline">cmd/&lt;app&gt;/main.go</code>, <code class="inline">internal/...</code> for private, <code class="inline">pkg/...</code> only if you publish reusable libs.</li>
+      <li><code class="inline">go mod tidy</code> after every dependency change. <code class="inline">go vet ./...</code> + <code class="inline">staticcheck</code> in CI.</li>
+    </ul>
+
+    <h2>2. Variables, constants, iota</h2>
+<pre data-lang="go">var x int            // zero value 0
+y := 42              // short form, function scope only
+const Pi = 3.14159   // untyped constant – no allocation, fits any numeric type
+
+type Status int
+const (
+    StatusUnknown Status = iota // 0
+    StatusPending               // 1
+    StatusActive                // 2
+)
+
+// Bit flags
+const (
+    Read  = 1 &lt;&lt; iota // 1
+    Write             // 2
+    Admin             // 4
+)
+</pre>
+
+    <h2>3. Strings, runes, bytes</h2>
+    <ul>
+      <li>A <code class="inline">string</code> is an immutable read-only slice of bytes (UTF-8 encoded).</li>
+      <li><code class="inline">len(s)</code> = bytes, <strong>not</strong> code points. Iterate with <code class="inline">for i, r := range s</code> to get runes.</li>
+      <li>Heavy concatenation → use <code class="inline">strings.Builder</code> (amortized O(n)).</li>
+    </ul>
+<pre data-lang="go">var b strings.Builder
+b.Grow(1024)
+for _, p := range parts {
+    b.WriteString(p)
+}
+result := b.String()
+</pre>
+
+    <h2 data-cram="essential">4. Arrays vs slices</h2>
+    <table>
+      <thead><tr><th></th><th>Array</th><th>Slice</th></tr></thead>
+      <tbody>
+        <tr><td>Type</td><td>[N]T (size in type)</td><td>[]T (header: ptr, len, cap)</td></tr>
+        <tr><td>Pass</td><td>By value (copies all)</td><td>Header by value (data shared)</td></tr>
+        <tr><td>Resize</td><td>No</td><td><code class="inline">append</code>, may reallocate</td></tr>
+        <tr><td>Use</td><td>Rare; fixed-size buffers</td><td>The default collection</td></tr>
+      </tbody>
+    </table>
+<pre data-lang="go">// Allocate with known capacity to avoid repeated growth.
+buf := make([]int, 0, 1024)
+for i := 0; i &lt; 1000; i++ {
+    buf = append(buf, i)
+}
+
+// Common bug: slicing exposes shared array
+a := []int{1, 2, 3, 4, 5}
+b := a[:2]
+b = append(b, 99)  // may overwrite a[2] if cap > len!
+
+// Safe copy
+c := append([]int(nil), a...)
+</pre>
+
+    <h2>5. Maps</h2>
+<pre data-lang="go">m := make(map[string]int, 64)   // pre-sized hint
+m["k"] = 1
+v, ok := m["k"]                  // comma-ok
+delete(m, "k")
+for k, v := range m { _, _ = k, v } // iteration order is randomized
+</pre>
+    <blockquote class="warn">Reading from a nil map is OK (zero value), writing panics. Don't take pointers to map values – they're not addressable.</blockquote>
+
+    <h2>6. Structs, methods, embedding</h2>
+<pre data-lang="go">type User struct {
+    ID   uint64
+    Name string
+}
+
+func (u User) Display() string  { return u.Name } // value receiver
+func (u *User) Rename(n string) { u.Name = n }    // pointer receiver
+
+// Embedding (composition, not inheritance)
+type Auditable struct{ CreatedAt time.Time }
+type Account struct {
+    Auditable          // promoted: a.CreatedAt
+    Balance int64
+}
+</pre>
+    <blockquote>Rule of thumb: pointer receivers if the method mutates state OR the struct is large OR you want a single method set; otherwise value receivers. Stay consistent within a type.</blockquote>
+
+    <h2 data-cram="essential">7. Interfaces — the killer feature</h2>
+<pre data-lang="go">type Reader interface {
+    Read(p []byte) (n int, err error)
+}
+
+// Implicit satisfaction: any type with the right methods is a Reader.
+type StringReader struct{ s string; i int }
+func (r *StringReader) Read(p []byte) (int, error) {
+    if r.i &gt;= len(r.s) { return 0, io.EOF }
+    n := copy(p, r.s[r.i:])
+    r.i += n
+    return n, nil
+}
+</pre>
+    <ul>
+      <li>Define interfaces on the consumer side, not the producer side. Keep them small (often 1–2 methods).</li>
+      <li>Interface value = (type descriptor, value). <strong>nil interface ≠ typed nil</strong>:</li>
+    </ul>
+<pre data-lang="go">func badNil() error {
+    var e *MyError = nil
+    return e          // returns a non-nil interface wrapping a nil *MyError
+}
+// Caller's `if err != nil` will be true. Always `return nil` explicitly.
+</pre>
+
+    <h2 data-cram="essential">8. Errors</h2>
+<pre data-lang="go">// Sentinel
+var ErrNotFound = errors.New("not found")
+
+// Custom typed error
+type ValidationError struct{ Field, Msg string }
+func (e *ValidationError) Error() string { return e.Field + ": " + e.Msg }
+
+// Wrapping & inspection
+if err := repo.Get(id); err != nil {
+    return fmt.Errorf("get user %d: %w", id, err)
+}
+if errors.Is(err, ErrNotFound)       { /* sentinel match */ }
+var ve *ValidationError
+if errors.As(err, &amp;ve)               { /* typed match */ }
+</pre>
+    <blockquote class="danger">Never panic across API boundaries. <code class="inline">panic</code> is for programmer errors; recover only at goroutine roots (e.g. HTTP middleware).</blockquote>
+
+    <h2>9. Defer, panic, recover</h2>
+<pre data-lang="go">func read(path string) (data []byte, err error) {
+    f, err := os.Open(path)
+    if err != nil { return nil, err }
+    defer f.Close() // LIFO; runs even on panic
+
+    return io.ReadAll(f)
+}
+
+// Capture panics at goroutine boundaries.
+func safeGo(fn func()) {
+    defer func() {
+        if r := recover(); r != nil {
+            log.Printf("panic: %v\n%s", r, debug.Stack())
+        }
+    }()
+    fn()
+}
+</pre>
+    <ul>
+      <li>Deferred calls evaluate <em>arguments</em> at defer time, body at return time.</li>
+      <li>Deferred function reading named returns can mutate them — useful for instrumentation.</li>
+    </ul>
+
+    <h2>10. Generics (1.18+)</h2>
+<pre data-lang="go">type Number interface { ~int | ~int64 | ~float64 }
+
+func Sum[T Number](xs []T) T {
+    var s T
+    for _, x := range xs { s += x }
+    return s
+}
+
+// Type sets, not just unions:
+type Ordered interface {
+    ~int | ~int64 | ~float64 | ~string
+}
+func Max[T Ordered](a, b T) T { if a &gt; b { return a }; return b }
+</pre>
+    <blockquote>Don't reach for generics first. They're for containers and algorithms over many types — not for replacing interfaces or for service plumbing.</blockquote>
+
+    <h2 data-cram="essential">Senior pitfalls</h2>
+    <ul>
+      <li>Returning typed-nil errors → tests pass, prod blows up.</li>
+      <li>Holding onto a slice of a huge buffer keeps the whole array alive (memory leak). <code class="inline">slices.Clone</code> when in doubt.</li>
+      <li>Closing a channel in a producer/consumer fan-in without coordination → panic.</li>
+      <li>Range-loop variable capture pre-1.22: <code class="inline">for _, v := range xs { go f(v) }</code> all see same v. Fixed in Go 1.22, still common in older codebases — copy explicitly.</li>
+      <li>Empty interface (<code class="inline">any</code>) is the new <code class="inline">interface{}</code>; prefer typed parameters or generics.</li>
+      <li>Using a pointer receiver on a small immutable struct — extra heap pressure, no upside.</li>
+      <li><code class="inline">append</code>'s aliasing trap — appending to a sub-slice may stomp on the original. Defensive <code class="inline">append([]T(nil), s...)</code> when handing off.</li>
+      <li>Mixing value and pointer receivers on the same type — half the methods satisfy the interface, the other half don't. Stay consistent.</li>
+    </ul>
+
+    <h2>Anti-patterns — what NOT to say</h2>
+    <ul>
+      <li>"I'll define an interface for every struct, just in case." Define interfaces on the consumer side; over-abstraction is a smell, not a virtue.</li>
+      <li>"<code class="inline">panic</code> is fine for validation errors." It's not — it's for unrecoverable programmer errors. Return errors.</li>
+      <li>"Getters and setters everywhere." In Go, an exported field is the public API. Encapsulate when it earns its keep, not by reflex.</li>
+      <li>"<code class="inline">init()</code> for everything." <code class="inline">init</code> hides ordering bugs and breaks tests. Prefer explicit constructors.</li>
+      <li>Treating empty interfaces as a Java <code class="inline">Object</code> escape hatch. If you find yourself reaching for <code class="inline">any</code>, reach for generics or a sum-type-style interface instead.</li>
+      <li>"Just <code class="inline">go</code> it" — every <code class="inline">go fn()</code> needs a clear shutdown story.</li>
+    </ul>
+
+    <h2 data-cram="essential">Senior interviewer follow-ups</h2>
+    <table>
+      <thead><tr><th>Probe</th><th>What they want to hear</th></tr></thead>
+      <tbody>
+        <tr><td>"Why do <code class="inline">map</code> and <code class="inline">chan</code> need <code class="inline">make</code>, but slices don't always?"</td><td>Maps and channels are reference types backed by runtime structs that need allocation. A nil slice is still a valid empty slice — append works on it.</td></tr>
+        <tr><td>"What does <code class="inline">x := s[2:4]</code> share with <code class="inline">s</code>?"</td><td>Backing array. Mutating one mutates the other (within the shared range).</td></tr>
+        <tr><td>"How does Go's <code class="inline">defer</code> stack work?"</td><td>LIFO, runs on every return path including panic. Args evaluated at <code class="inline">defer</code> time, body at unwind.</td></tr>
+        <tr><td>"Why is interface <code class="inline">nil</code>-comparison weird?"</td><td>An interface value is <code class="inline">(type, value)</code>. <code class="inline">nil interface</code> means both are nil. A typed-nil — <code class="inline">(*T)(nil)</code> wrapped in an interface — is non-nil.</td></tr>
+        <tr><td>"When do you reach for generics?"</td><td>Containers, algorithms, helpers over many types. Almost never for service layers.</td></tr>
+        <tr><td>"How do constants differ from variables?"</td><td>Constants are compile-time, untyped by default, infinitely-precise numerics, no addresses.</td></tr>
+        <tr><td>"What's the cost of method-value vs method-expression vs receiver call?"</td><td>Direct call = static dispatch, free. Interface call = itab lookup. Method value = closure allocation if it escapes.</td></tr>
+      </tbody>
+    </table>
+
+    <h2 data-cram="essential">Self-check</h2>
+    <ul class="checklist" data-key="go-basics-check">
+      <li><input type="checkbox"/><span>I can explain slice header (ptr, len, cap) and when <code class="inline">append</code> reallocates.</span></li>
+      <li><input type="checkbox"/><span>I know why typed-nil errors return non-nil interfaces — and how to avoid it.</span></li>
+      <li><input type="checkbox"/><span>I can choose value vs pointer receivers and explain the rule.</span></li>
+      <li><input type="checkbox"/><span>I can write a small interface, satisfy it implicitly, and explain its (type, value) pair-shape.</span></li>
+      <li><input type="checkbox"/><span>I can wrap and inspect errors with <code class="inline">%w</code>, <code class="inline">errors.Is</code>, <code class="inline">errors.As</code>.</span></li>
+      <li><input type="checkbox"/><span>I can sketch the anatomy of a <code class="inline">go.mod</code> + canonical project layout.</span></li>
+      <li><input type="checkbox"/><span>I understand iota, bit-flag enums, and untyped vs typed constants.</span></li>
+      <li><input type="checkbox"/><span>I know <code class="inline">defer</code>'s arg-evaluation timing and LIFO order.</span></li>
+      <li><input type="checkbox"/><span>I can reason about strings as immutable byte slices and iterate runes correctly.</span></li>
+      <li><input type="checkbox"/><span>I can write a one-line generic <code class="inline">Map[A,B]</code> / <code class="inline">Filter[T]</code> / <code class="inline">Reduce[T,A]</code>.</span></li>
+    </ul>
+
+    <div class="footer">Next → <a href="go-advanced.html">Advanced Go</a></div>
+  </main>
+</div>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>

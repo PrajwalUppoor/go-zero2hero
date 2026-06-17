@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Two Pointers — Go: Zero → Hero</title>
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar-root"></aside>
+  <main class="main">
+    <div class="crumbs"><a href="../index.html">Home</a> / Patterns / Two Pointers</div>
+    <section class="page-header">
+      <div>
+        <h1>Two Pointers</h1>
+        <p>When the array is sorted (or can be), two pointers crush O(n²) brute force into O(n). Use it for pair sums, partitions, palindromes, in-place compaction.</p>
+      </div>
+    </section>
+
+    <h2 data-cram="essential">Mental model</h2>
+    <ul>
+      <li><b>Three flavors</b>:
+        <ol>
+          <li><b>Opposite ends</b> — converging on a sorted array (pair sum, palindrome, container).</li>
+          <li><b>Same direction, fast/slow</b> — write/read pointers for in-place compaction; cycle detection on linked lists.</li>
+          <li><b>Two arrays in lockstep</b> — merging, comparing.</li>
+        </ol>
+      </li>
+      <li><b>The win condition</b>: each pointer moves at most n times, so the loop is O(n) instead of O(n²).</li>
+      <li><b>The trigger</b>: monotonicity. Moving a pointer should only ever <i>tighten</i> or <i>loosen</i> a constraint, never both.</li>
+      <li><b>If the array isn't sorted</b>, sort it first <i>only if</i> indices don't matter in the answer; otherwise reach for hashing.</li>
+    </ul>
+
+    <h2 data-cram="essential">Pattern A — Opposite ends (sorted array)</h2>
+<pre data-lang="go">func twoSumSorted(a []int, target int) (int, int) {
+    l, r := 0, len(a)-1
+    for l &lt; r {
+        s := a[l] + a[r]
+        switch {
+        case s == target: return l, r
+        case s &lt; target:  l++
+        default:          r--
+        }
+    }
+    return -1, -1
+}
+</pre>
+
+    <h2>Pattern B — Same direction (write index)</h2>
+<pre data-lang="go">// Remove duplicates from sorted array, in-place.
+func removeDuplicates(a []int) int {
+    w := 0
+    for r := 0; r &lt; len(a); r++ {
+        if w == 0 || a[r] != a[w-1] {
+            a[w] = a[r]; w++
+        }
+    }
+    return w
+}
+</pre>
+
+    <h2>Pattern C — Three sum</h2>
+<pre data-lang="go">func threeSum(nums []int) [][]int {
+    sort.Ints(nums)
+    var res [][]int
+    for i := 0; i &lt; len(nums)-2; i++ {
+        if i &gt; 0 &amp;&amp; nums[i] == nums[i-1] { continue }
+        l, r := i+1, len(nums)-1
+        for l &lt; r {
+            s := nums[i] + nums[l] + nums[r]
+            switch {
+            case s == 0:
+                res = append(res, []int{nums[i], nums[l], nums[r]})
+                l++; r--
+                for l &lt; r &amp;&amp; nums[l] == nums[l-1] { l++ }
+                for l &lt; r &amp;&amp; nums[r] == nums[r+1] { r-- }
+            case s &lt; 0: l++
+            default:    r--
+            }
+        }
+    }
+    return res
+}
+</pre>
+
+    <h2>Pattern D — Container with most water / trap rain</h2>
+<pre data-lang="go">func maxArea(h []int) int {
+    l, r, best := 0, len(h)-1, 0
+    for l &lt; r {
+        area := min(h[l], h[r]) * (r - l)
+        if area &gt; best { best = area }
+        if h[l] &lt; h[r] { l++ } else { r-- }
+    }
+    return best
+}
+
+func trap(h []int) int {
+    l, r := 0, len(h)-1
+    lm, rm, ans := 0, 0, 0
+    for l &lt; r {
+        if h[l] &lt; h[r] {
+            if h[l] &gt; lm { lm = h[l] } else { ans += lm - h[l] }
+            l++
+        } else {
+            if h[r] &gt; rm { rm = h[r] } else { ans += rm - h[r] }
+            r--
+        }
+    }
+    return ans
+}
+</pre>
+
+    <h2>When NOT to use two pointers</h2>
+    <ul>
+      <li>Unsorted data with no derivable monotonic invariant — try hashing or sorting first.</li>
+      <li>You need contiguous subarrays with a sum constraint that can grow either direction → use sliding window or prefix sums.</li>
+      <li>Sum can be negative AND target is fixed → prefix-sum + hashmap, not two pointers.</li>
+      <li>You need indices in the original (unsorted) array → can't sort destructively.</li>
+    </ul>
+
+    <h2 data-cram="essential">Must-do problems</h2>
+    <table>
+      <thead><tr><th>Problem</th><th>Pattern</th><th>Time</th></tr></thead>
+      <tbody>
+        <tr><td>Two Sum II (sorted input)</td><td>Opposite ends</td><td>O(n)</td></tr>
+        <tr><td>Three Sum / Three Sum Closest</td><td>Sort + fix one + two pointers</td><td>O(n²)</td></tr>
+        <tr><td>Four Sum</td><td>Sort + fix two + two pointers</td><td>O(n³)</td></tr>
+        <tr><td>Remove Duplicates from Sorted Array (I &amp; II)</td><td>Read/write index</td><td>O(n) / O(1)</td></tr>
+        <tr><td>Move Zeroes</td><td>Read/write index</td><td>O(n) / O(1)</td></tr>
+        <tr><td>Container With Most Water</td><td>Greedy opposite ends</td><td>O(n)</td></tr>
+        <tr><td>Trapping Rain Water</td><td>Two pointers w/ leftMax / rightMax</td><td>O(n)</td></tr>
+        <tr><td>Valid Palindrome (II — at most one delete)</td><td>Opposite ends + branch</td><td>O(n)</td></tr>
+        <tr><td>Sort Colors (Dutch flag)</td><td>Three pointers (lo, mid, hi)</td><td>O(n)</td></tr>
+        <tr><td>Squares of a Sorted Array</td><td>Merge from outside in, write to back</td><td>O(n)</td></tr>
+        <tr><td>Merge Sorted Array (in place)</td><td>Write from the back</td><td>O(m+n)</td></tr>
+        <tr><td>Reverse String / Reverse Vowels</td><td>Opposite ends</td><td>O(n)</td></tr>
+        <tr><td>Backspace String Compare</td><td>Two pointers from the back, skip backspaces</td><td>O(n) / O(1)</td></tr>
+        <tr><td>Subarray Product Less Than K</td><td>Same-direction window + product</td><td>O(n)</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Anti-patterns — what NOT to say</h2>
+    <ul>
+      <li>"I'll use two pointers on the unsorted array." Won't work without monotonicity — you'll skip valid pairs.</li>
+      <li>Using two pointers when negatives + arbitrary target → reach for hashmap.</li>
+      <li>Forgetting to skip duplicates after a hit in 3-Sum / 4-Sum — the answer set will contain duplicates.</li>
+      <li>Advancing both pointers on equal-sum case in 3-Sum without skipping duplicate values.</li>
+      <li>Sorting (and losing original indices) when the problem expects original indices.</li>
+    </ul>
+
+    <h2 data-cram="essential">Senior interviewer follow-ups</h2>
+    <table>
+      <thead><tr><th>Probe</th><th>What they want to hear</th></tr></thead>
+      <tbody>
+        <tr><td>"Three Sum without sorting?"</td><td>Hashmap-based: for each pair, look up complement. Same time, more space, same dedup pain.</td></tr>
+        <tr><td>"Why does the converging-pointer move the smaller side in Container With Most Water?"</td><td>Moving the larger side can only shrink width <i>and</i> potentially shrink height — never improves.</td></tr>
+        <tr><td>"Trap Rain Water with O(1) space — how?"</td><td>Two-pointer; whichever side has the smaller max can be filled deterministically.</td></tr>
+        <tr><td>"How does Dutch flag handle 4 colors?"</td><td>Generalizes to k buckets; consider counting sort or k-1 passes of partition.</td></tr>
+        <tr><td>"Two pointers vs sliding window — when is which?"</td><td>Two pointers usually move toward each other or have a write-vs-read role; sliding window is a single direction with grow/shrink under a predicate.</td></tr>
+      </tbody>
+    </table>
+
+    <h2 data-cram="essential">Pitfalls</h2>
+    <ul>
+      <li>Off-by-one when checking <code class="inline">l &lt; r</code> vs <code class="inline">l &lt;= r</code> — both are correct in different contexts; pick one and own it.</li>
+      <li>Forgetting that "skip duplicates" must use a previous-value comparison, not previous-index.</li>
+      <li>For palindromes with mixed case / punctuation, normalize first or skip in-place — don't mutate the input.</li>
+    </ul>
+
+    <h2 data-cram="essential">Self-check</h2>
+    <ul class="checklist" data-key="two-pointers-check">
+      <li><input type="checkbox"/><span>I can write Two Sum II from memory in O(n) / O(1).</span></li>
+      <li><input type="checkbox"/><span>I can write Three Sum and handle duplicate skipping correctly.</span></li>
+      <li><input type="checkbox"/><span>I can solve Trapping Rain Water in O(n) / O(1) with two pointers.</span></li>
+      <li><input type="checkbox"/><span>I can implement Dutch flag (Sort Colors) in one pass.</span></li>
+      <li><input type="checkbox"/><span>I can do in-place removal/move-zeroes with read/write pointers.</span></li>
+      <li><input type="checkbox"/><span>I can merge two sorted arrays in place (write from the back).</span></li>
+      <li><input type="checkbox"/><span>I know when two pointers fails (negatives + sum, or unsorted).</span></li>
+      <li><input type="checkbox"/><span>I can solve Squares of a Sorted Array in O(n).</span></li>
+      <li><input type="checkbox"/><span>I can recognize the "skip duplicates" requirement and code it.</span></li>
+      <li><input type="checkbox"/><span>I can explain why opposite-end converging moves the smaller side.</span></li>
+    </ul>
+
+    <div class="footer">Next → <a href="sliding-window.html">Sliding window</a></div>
+  </main>
+</div>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bit Manipulation — Go: Zero → Hero</title>
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar-root"></aside>
+  <main class="main">
+    <div class="crumbs"><a href="../index.html">Home</a> / Patterns / Bit Manipulation</div>
+    <section class="page-header">
+      <div>
+        <h1>Bit Manipulation</h1>
+        <p>Constant-time tricks, subset enumeration, bitmask DP, and XOR magic for "find the one different".</p>
+      </div>
+    </section>
+
+    <h2 data-cram="essential">Mental model</h2>
+    <ul>
+      <li><b>Trigger words</b>: "find the one different / unique", "all subsets", "without using <code class="inline">+</code>", "count bits", "constant-time math", "n ≤ 20" (bitmask DP).</li>
+      <li><b>Three high-leverage techniques</b>:
+        <ol>
+          <li><b>XOR magic</b> — pairs cancel; the leftover is the unpaired element.</li>
+          <li><b>Subset enumeration</b> — <code class="inline">for mask in 0..2^n</code>; or submasks via <code class="inline">sub = (sub-1) &amp; mask</code>.</li>
+          <li><b>Lowest-set-bit isolation</b> — <code class="inline">x &amp; -x</code>, the basis of Fenwick trees and many "find a difference" tricks.</li>
+        </ol>
+      </li>
+      <li><b>Use <code class="inline">math/bits</code></b>: <code class="inline">OnesCount</code>, <code class="inline">TrailingZeros</code>, <code class="inline">LeadingZeros</code>, <code class="inline">Len</code>, <code class="inline">Reverse</code>. They compile to single instructions.</li>
+      <li><b>Beware sign extension</b>: right-shifting a signed int preserves sign in Go. Cast to <code class="inline">uint</code> for logical shift.</li>
+    </ul>
+
+    <h2 data-cram="essential">The 12 must-know tricks</h2>
+<pre data-lang="go">x &amp; 1                 // lowest bit (parity)
+x &gt;&gt; 1                // divide by 2
+x &lt;&lt; k                // multiply by 2^k
+x | (1 &lt;&lt; k)         // set bit k
+x &amp; ^(1 &lt;&lt; k)         // clear bit k
+x ^ (1 &lt;&lt; k)          // toggle bit k
+(x &gt;&gt; k) &amp; 1          // read bit k
+x &amp; (x-1)             // clear lowest set bit  → loop runs popcount times
+x &amp; -x                // isolate lowest set bit  (uses two's complement)
+x ^ y                 // toggle bits where different (find single duplicate)
+^x                    // bitwise NOT
+bits.OnesCount(uint(x))      // popcount
+bits.TrailingZeros(uint(x))  // index of lowest set bit
+bits.LeadingZeros(uint(x))   // 64 - msb position
+</pre>
+
+    <h2>Classic problems</h2>
+
+    <h3>Single Number (everyone twice, one once)</h3>
+<pre data-lang="go">func singleNumber(a []int) int {
+    x := 0
+    for _, v := range a { x ^= v }
+    return x
+}
+</pre>
+
+    <h3>Two non-duplicates among pairs</h3>
+<pre data-lang="go">// XOR all → x = a^b. Pick any set bit; split numbers into two groups by that bit.
+func singleNumberIII(a []int) [2]int {
+    x := 0
+    for _, v := range a { x ^= v }
+    bit := x &amp; -x
+    var p, q int
+    for _, v := range a { if v &amp; bit == 0 { p ^= v } else { q ^= v } }
+    return [2]int{p, q}
+}
+</pre>
+
+    <h3>Single Number II (everyone three times, one once)</h3>
+<pre data-lang="go">// Sum each bit modulo 3.
+func singleNumberII(a []int) int {
+    ans := 0
+    for b := 0; b &lt; 32; b++ {
+        s := 0
+        for _, v := range a { s += (v &gt;&gt; b) &amp; 1 }
+        if s%3 != 0 { ans |= 1 &lt;&lt; b }
+    }
+    return ans
+}
+</pre>
+
+    <h3>Counting bits 0..n in O(n)</h3>
+<pre data-lang="go">// bits[i] = bits[i &gt;&gt; 1] + (i &amp; 1)
+func countBits(n int) []int {
+    res := make([]int, n+1)
+    for i := 1; i &lt;= n; i++ { res[i] = res[i&gt;&gt;1] + (i &amp; 1) }
+    return res
+}
+</pre>
+
+    <h3>Subsets via bitmask</h3>
+<pre data-lang="go">func subsets(a []int) [][]int {
+    n := len(a)
+    res := make([][]int, 0, 1&lt;&lt;n)
+    for mask := 0; mask &lt; 1&lt;&lt;n; mask++ {
+        var sub []int
+        for i := 0; i &lt; n; i++ {
+            if mask &amp; (1 &lt;&lt; i) != 0 { sub = append(sub, a[i]) }
+        }
+        res = append(res, sub)
+    }
+    return res
+}
+</pre>
+
+    <h3>Iterate every submask of a mask</h3>
+<pre data-lang="go">for sub := mask; sub &gt; 0; sub = (sub - 1) &amp; mask {
+    // process sub
+}
+// Total work over all masks is O(3^n).
+</pre>
+
+    <h3>Power of two / four</h3>
+<pre data-lang="go">isPow2  := x &gt; 0 &amp;&amp; x &amp; (x-1) == 0
+isPow4  := isPow2 &amp;&amp; (x &amp; 0x55555555) != 0
+</pre>
+
+    <h3>Swap without temp (don't do this in code review)</h3>
+<pre data-lang="go">a ^= b; b ^= a; a ^= b   // works only if a and b are distinct memory locations
+</pre>
+
+    <h2>Gotchas in Go</h2>
+    <ul>
+      <li>Right-shift on signed int is arithmetic (preserves sign); cast to <code class="inline">uint</code> for logical shift.</li>
+      <li>Shift count must be unsigned or a typed constant (since Go 1.13 either signed or unsigned is OK at runtime).</li>
+      <li>Bit count uses <code class="inline">math/bits</code>; it compiles to a single instruction on most CPUs.</li>
+    </ul>
+
+    <h2 data-cram="essential">Must-do problems</h2>
+    <table>
+      <thead><tr><th>Problem</th><th>Trick</th></tr></thead>
+      <tbody>
+        <tr><td>Single Number I / II / III</td><td>XOR / mod-3 bit count / partition by lowest set bit</td></tr>
+        <tr><td>Number of 1 Bits</td><td><code class="inline">x &amp; (x-1)</code> until 0</td></tr>
+        <tr><td>Counting Bits</td><td><code class="inline">bits[i] = bits[i&gt;&gt;1] + (i &amp; 1)</code></td></tr>
+        <tr><td>Reverse Bits</td><td>Bitwise reverse using <code class="inline">bits.Reverse</code></td></tr>
+        <tr><td>Hamming Distance / Total Hamming Distance</td><td>Per-bit count or popcount of XOR</td></tr>
+        <tr><td>Power of Two / Three / Four</td><td><code class="inline">x &amp; (x-1) == 0</code> + parity mask</td></tr>
+        <tr><td>Bitwise AND of Numbers Range</td><td>Common prefix of <code class="inline">l</code> and <code class="inline">r</code></td></tr>
+        <tr><td>Maximum XOR of Two Numbers</td><td>Binary trie</td></tr>
+        <tr><td>Subsets via bitmask</td><td>Iterate <code class="inline">0..2^n</code></td></tr>
+        <tr><td>Sum of Two Integers (no <code class="inline">+</code>)</td><td>XOR for sum, AND&lt;&lt;1 for carry, recurse</td></tr>
+        <tr><td>Gray Code</td><td><code class="inline">i ^ (i &gt;&gt; 1)</code></td></tr>
+        <tr><td>Find the Difference</td><td>XOR of all chars</td></tr>
+        <tr><td>Missing Number</td><td>XOR <code class="inline">0..n</code> with array</td></tr>
+        <tr><td>Bitwise ORs of Subarrays</td><td>Per-position set of distinct ORs</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Anti-patterns — what NOT to say</h2>
+    <ul>
+      <li>Counting bits with a manual loop when <code class="inline">bits.OnesCount</code> is one instruction.</li>
+      <li>Mixing signed and unsigned shifts inadvertently.</li>
+      <li>The XOR-swap "trick" in production code — undefined when both refs alias.</li>
+      <li>Iterating <code class="inline">2^n</code> subsets for n &gt; 20 — won't finish.</li>
+      <li>Using bit tricks where readable code suffices — code review will scold.</li>
+    </ul>
+
+    <h2 data-cram="essential">Senior interviewer follow-ups</h2>
+    <table>
+      <thead><tr><th>Probe</th><th>What they want to hear</th></tr></thead>
+      <tbody>
+        <tr><td>"Why does <code class="inline">x &amp; -x</code> isolate the lowest set bit?"</td><td>Two's complement: <code class="inline">-x = ~x + 1</code>; AND keeps only the bit that flipped from 0 to 1.</td></tr>
+        <tr><td>"Sum without <code class="inline">+</code>?"</td><td>XOR is sum without carry; <code class="inline">(a &amp; b) &lt;&lt; 1</code> is the carry; iterate until carry is 0.</td></tr>
+        <tr><td>"Maximum XOR of two numbers — why a binary trie?"</td><td>For each candidate, greedily walk the trie picking the opposite bit when present.</td></tr>
+        <tr><td>"Counting bits in O(n)?"</td><td>Recurrence on <code class="inline">i &gt;&gt; 1</code> — the bit count is the count of half plus the lowest bit.</td></tr>
+        <tr><td>"Bitmask DP space — when is it feasible?"</td><td>n ≤ ~20 (4M states). For n ≈ 30 we need profile + state compression.</td></tr>
+      </tbody>
+    </table>
+
+    <h2 data-cram="essential">Self-check</h2>
+    <ul class="checklist" data-key="bit-check">
+      <li><input type="checkbox"/><span>I know all 12 must-know bit tricks by heart.</span></li>
+      <li><input type="checkbox"/><span>I can solve Single Number I/II/III.</span></li>
+      <li><input type="checkbox"/><span>I can compute counting bits in O(n) using the recurrence.</span></li>
+      <li><input type="checkbox"/><span>I can iterate all submasks of a mask.</span></li>
+      <li><input type="checkbox"/><span>I can implement sum without <code class="inline">+</code>.</span></li>
+      <li><input type="checkbox"/><span>I can use <code class="inline">math/bits</code> functions appropriately.</span></li>
+      <li><input type="checkbox"/><span>I know the difference between signed and unsigned right-shift.</span></li>
+      <li><input type="checkbox"/><span>I can build a binary trie for Maximum XOR pair.</span></li>
+      <li><input type="checkbox"/><span>I can solve Gray Code with <code class="inline">i ^ (i&gt;&gt;1)</code>.</span></li>
+      <li><input type="checkbox"/><span>I know <code class="inline">x &amp; -x</code> as the basis for Fenwick trees.</span></li>
+    </ul>
+
+    <div class="footer">Next → <a href="intervals.html">Intervals</a></div>
+  </main>
+</div>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>

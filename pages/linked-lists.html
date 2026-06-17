@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Linked Lists — Go: Zero → Hero</title>
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar-root"></aside>
+  <main class="main">
+    <div class="crumbs"><a href="../index.html">Home</a> / Patterns / Linked Lists</div>
+    <section class="page-header">
+      <div>
+        <h1>Linked Lists</h1>
+        <p>Every linked-list problem is a 3-pointer dance (prev, cur, next) plus a dummy head. Master fast/slow, reverse, and merge — the rest is recombination.</p>
+      </div>
+    </section>
+
+    <h2 data-cram="essential">Mental model</h2>
+    <ul>
+      <li><b>Three pointers + a dummy head solve almost everything.</b> <code class="inline">prev</code> for stitching, <code class="inline">cur</code> for "where I am", <code class="inline">next</code> saved before mutating <code class="inline">cur.Next</code>.</li>
+      <li><b>Five primitives</b> compose all linked-list problems: reverse, find middle, detect cycle (Floyd), merge two sorted, k-th from end (gap pointer).</li>
+      <li><b>If a problem requires "two passes minimum"</b> (like palindrome, reorder), it's "find middle, reverse second half, do something".</li>
+      <li><b>If a problem is about "K"</b> (Kth from end, rotate by K, reverse in groups of K), it's the gap-pointer trick.</li>
+      <li><b>Watch for memory ownership.</b> In Go, dangling <code class="inline">prev.Next</code> assignments can keep entire sublists alive. Set to <code class="inline">nil</code> when isolating.</li>
+    </ul>
+
+    <h2>Node definition</h2>
+<pre data-lang="go">type ListNode struct {
+    Val  int
+    Next *ListNode
+}
+</pre>
+
+    <h2>Universal trick: dummy head</h2>
+<pre data-lang="go">dummy := &amp;ListNode{Next: head}
+prev := dummy
+// ... operate via prev ...
+return dummy.Next
+</pre>
+
+    <h2 data-cram="essential">Reverse a list (iterative)</h2>
+<pre data-lang="go">func reverse(head *ListNode) *ListNode {
+    var prev *ListNode
+    cur := head
+    for cur != nil {
+        nxt := cur.Next
+        cur.Next = prev
+        prev = cur
+        cur = nxt
+    }
+    return prev
+}
+</pre>
+
+    <h2>Reverse a sublist [l, r]</h2>
+<pre data-lang="go">func reverseBetween(head *ListNode, left, right int) *ListNode {
+    dummy := &amp;ListNode{Next: head}
+    prev := dummy
+    for i := 1; i &lt; left; i++ { prev = prev.Next }
+    cur := prev.Next
+    for i := 0; i &lt; right-left; i++ {
+        nxt := cur.Next
+        cur.Next = nxt.Next
+        nxt.Next = prev.Next
+        prev.Next = nxt
+    }
+    return dummy.Next
+}
+</pre>
+
+    <h2 data-cram="essential">Cycle detection (Floyd)</h2>
+<pre data-lang="go">func detectCycle(head *ListNode) *ListNode {
+    slow, fast := head, head
+    for fast != nil &amp;&amp; fast.Next != nil {
+        slow, fast = slow.Next, fast.Next.Next
+        if slow == fast {
+            p := head
+            for p != slow { p = p.Next; slow = slow.Next }
+            return p
+        }
+    }
+    return nil
+}
+</pre>
+
+    <h2>Find middle</h2>
+<pre data-lang="go">// Slow ends on the (n/2 + 1)-th node for even length (right of center).
+slow, fast := head, head
+for fast != nil &amp;&amp; fast.Next != nil { slow, fast = slow.Next, fast.Next.Next }
+</pre>
+
+    <h2>Merge two sorted lists</h2>
+<pre data-lang="go">func merge(a, b *ListNode) *ListNode {
+    dummy := &amp;ListNode{}; tail := dummy
+    for a != nil &amp;&amp; b != nil {
+        if a.Val &lt; b.Val { tail.Next = a; a = a.Next } else { tail.Next = b; b = b.Next }
+        tail = tail.Next
+    }
+    if a != nil { tail.Next = a } else { tail.Next = b }
+    return dummy.Next
+}
+</pre>
+
+    <h2>Merge K sorted lists (heap)</h2>
+<pre data-lang="go">// Heap of (val, listIdx); pop, append to tail, push next of that list.
+// O(N log k) where N = total nodes, k = #lists.
+</pre>
+
+    <h2>Add two numbers</h2>
+<pre data-lang="go">func addTwoNumbers(a, b *ListNode) *ListNode {
+    dummy := &amp;ListNode{}; tail := dummy; carry := 0
+    for a != nil || b != nil || carry &gt; 0 {
+        s := carry
+        if a != nil { s += a.Val; a = a.Next }
+        if b != nil { s += b.Val; b = b.Next }
+        carry = s / 10
+        tail.Next = &amp;ListNode{Val: s % 10}
+        tail = tail.Next
+    }
+    return dummy.Next
+}
+</pre>
+
+    <h2>Reorder / partition / rotate</h2>
+    <ul>
+      <li><b>Reorder L0→Ln→L1→…</b> — find middle, reverse second half, weave.</li>
+      <li><b>Palindrome check</b> — same trick: middle + reverse + compare.</li>
+      <li><b>Partition around x</b> — two dummy heads (less, geq), concatenate.</li>
+      <li><b>Rotate right by k</b> — close the loop, walk to new tail, cut.</li>
+    </ul>
+
+    <h2 data-cram="essential">Must-do</h2>
+    <table>
+      <thead><tr><th>Problem</th><th>Trick</th><th>Time</th></tr></thead>
+      <tbody>
+        <tr><td>Reverse Linked List (I &amp; II)</td><td>3-pointer dance / sub-range stitching</td><td>O(n)</td></tr>
+        <tr><td>Linked List Cycle (I &amp; II)</td><td>Floyd; reset slow to head for entry</td><td>O(n) / O(1)</td></tr>
+        <tr><td>Merge Two Sorted Lists</td><td>Dummy + tail</td><td>O(m+n)</td></tr>
+        <tr><td>Merge K Sorted Lists</td><td>Min-heap of heads or divide &amp; conquer</td><td>O(N log k)</td></tr>
+        <tr><td>Remove Nth From End</td><td>Gap of N then advance both</td><td>O(n) / O(1)</td></tr>
+        <tr><td>Reorder List (L0→Ln→L1…)</td><td>Find mid + reverse second half + weave</td><td>O(n)</td></tr>
+        <tr><td>Palindrome Linked List</td><td>Mid + reverse + compare</td><td>O(n) / O(1)</td></tr>
+        <tr><td>Reverse Nodes in K-Group</td><td>Recurse / iterate per group</td><td>O(n)</td></tr>
+        <tr><td>Rotate List by K</td><td>Close into cycle, walk to new tail</td><td>O(n) / O(1)</td></tr>
+        <tr><td>Swap Pairs / Odd Even List</td><td>Pointer rewiring</td><td>O(n)</td></tr>
+        <tr><td>Copy List with Random Pointer</td><td>Interleave clones + split</td><td>O(n) / O(1)</td></tr>
+        <tr><td>Add Two Numbers (I &amp; II)</td><td>Carry propagation; reverse for II</td><td>O(max(m,n))</td></tr>
+        <tr><td>Intersection of Two Linked Lists</td><td>Two pointers, switch heads at end</td><td>O(m+n) / O(1)</td></tr>
+        <tr><td>Sort Linked List</td><td>Merge sort (top-down or bottom-up)</td><td>O(n log n)</td></tr>
+        <tr><td>LRU Cache</td><td>Doubly-linked list + hashmap</td><td>O(1) per op</td></tr>
+        <tr><td>LFU Cache</td><td>Map of freq → DLL + min-freq pointer</td><td>O(1) per op</td></tr>
+        <tr><td>Flatten a Multilevel DLL</td><td>DFS / explicit stack</td><td>O(n)</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Anti-patterns — what NOT to say</h2>
+    <ul>
+      <li>Recursing on a million-node list — stack overflow. Iterate.</li>
+      <li>Mutating <code class="inline">cur.Next</code> before saving <code class="inline">next := cur.Next</code> — guaranteed lost-pointer bug.</li>
+      <li>Forgetting the dummy head and writing 5 special cases for "is the first node included?".</li>
+      <li>Using a slice to "make linked-list problems easier" — the interviewer wants pointer manipulation.</li>
+      <li>Returning <code class="inline">head</code> from a function that may have made a new head — return <code class="inline">dummy.Next</code> instead.</li>
+    </ul>
+
+    <h2 data-cram="essential">Senior interviewer follow-ups</h2>
+    <table>
+      <thead><tr><th>Probe</th><th>What they want to hear</th></tr></thead>
+      <tbody>
+        <tr><td>"Why does Floyd's tortoise-hare find the cycle entry?"</td><td>Algebra: distance from head to entry equals distance from meeting point to entry (mod cycle length).</td></tr>
+        <tr><td>"How do you reverse in groups of K with O(1) extra space?"</td><td>Iterate, count K, reverse that segment in place, link to previous segment's tail.</td></tr>
+        <tr><td>"What's <code class="inline">O(1)</code> Copy with Random Pointer?"</td><td>Interleave each clone after its original; fix random pointers via <code class="inline">orig.next.random = orig.random.next</code>; then unweave.</td></tr>
+        <tr><td>"How does LRU achieve O(1)?"</td><td>Hashmap of key → node ptr in a doubly-linked list. Touch = move-to-front; evict = pop tail.</td></tr>
+        <tr><td>"Detect intersection without modifying the lists?"</td><td>Two pointers; when one hits null, switch to the other head. Both travel m+n; meet at intersection.</td></tr>
+        <tr><td>"Sort linked list in O(n log n) / O(1) extra?"</td><td>Bottom-up merge sort: width 1, 2, 4, 8, ... merge pairs in place.</td></tr>
+      </tbody>
+    </table>
+
+    <h2 data-cram="essential">Self-check</h2>
+    <ul class="checklist" data-key="linked-lists-check">
+      <li><input type="checkbox"/><span>I can reverse a list iteratively, no peeking.</span></li>
+      <li><input type="checkbox"/><span>I can find the middle (with the right tie-break for even-length).</span></li>
+      <li><input type="checkbox"/><span>I can detect cycle and find its entry node.</span></li>
+      <li><input type="checkbox"/><span>I can merge two sorted lists with a dummy.</span></li>
+      <li><input type="checkbox"/><span>I can remove N-th from end in one pass.</span></li>
+      <li><input type="checkbox"/><span>I can reorder / check palindrome with mid + reverse + weave/compare.</span></li>
+      <li><input type="checkbox"/><span>I can implement an LRU cache from scratch in O(1).</span></li>
+      <li><input type="checkbox"/><span>I can copy a list with random pointers in O(1) extra space.</span></li>
+      <li><input type="checkbox"/><span>I can reverse in groups of K, iterative.</span></li>
+      <li><input type="checkbox"/><span>I can find intersection of two lists without a hashset.</span></li>
+    </ul>
+
+    <div class="footer">Next → <a href="stacks-queues.html">Stacks & queues</a></div>
+  </main>
+</div>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>

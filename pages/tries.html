@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tries — Go: Zero → Hero</title>
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar-root"></aside>
+  <main class="main">
+    <div class="crumbs"><a href="../index.html">Home</a> / Patterns / Tries</div>
+    <section class="page-header">
+      <div>
+        <h1>Tries (Prefix Trees)</h1>
+        <p>Anything with prefixes, autocomplete, word dictionaries or XOR-max-pair lives here. O(L) per op where L is the word length.</p>
+      </div>
+    </section>
+
+    <h2 data-cram="essential">Mental model</h2>
+    <ul>
+      <li><b>Trigger words</b>: prefix, autocomplete, dictionary of words, max XOR pair, longest common prefix, word break with many words.</li>
+      <li><b>Each node represents a prefix</b>; children correspond to next characters. <code class="inline">isWord</code> marks a complete word.</li>
+      <li><b>Time complexity</b>: O(L) per insert / search, O(N·L) total to build, where L is max word length.</li>
+      <li><b>Space</b> is the killer: O(Σ N·L) worst case. Use a map of children for big alphabets, an array for fixed alphabets.</li>
+      <li><b>Two specialized variants</b>: <i>binary trie</i> (bits, max-XOR pair); <i>compressed trie / radix tree</i> (path-compressed; used in routers, IP lookups, file systems).</li>
+    </ul>
+
+    <h2 data-cram="essential">Reference implementation</h2>
+<pre data-lang="go">type Trie struct {
+    children [26]*Trie
+    isWord   bool
+}
+
+func (t *Trie) Insert(w string) {
+    cur := t
+    for i := 0; i &lt; len(w); i++ {
+        c := w[i] - 'a'
+        if cur.children[c] == nil { cur.children[c] = &amp;Trie{} }
+        cur = cur.children[c]
+    }
+    cur.isWord = true
+}
+
+func (t *Trie) find(w string) *Trie {
+    cur := t
+    for i := 0; i &lt; len(w); i++ {
+        c := w[i] - 'a'
+        if cur.children[c] == nil { return nil }
+        cur = cur.children[c]
+    }
+    return cur
+}
+
+func (t *Trie) Search(w string)      bool { n := t.find(w); return n != nil &amp;&amp; n.isWord }
+func (t *Trie) StartsWith(p string)  bool { return t.find(p) != nil }
+</pre>
+    <ul>
+      <li><code class="inline">[26]*Trie</code> children for lowercase. Use a map for big/Unicode alphabets.</li>
+      <li>Add metadata (count, list of indexes) per node for autocomplete or top-K suggestions.</li>
+    </ul>
+
+    <h2>Word Search II — Trie + DFS</h2>
+<pre data-lang="go">// Build a trie of all target words; DFS the board, descending the trie in lock-step.
+// Stop a branch as soon as the trie node has no children.
+// Mark visited cells by overwriting (and restore on backtrack).
+</pre>
+
+    <h2>Word Dictionary with wildcard '.'</h2>
+<pre data-lang="go">type WordDict struct{ root *Trie }
+
+func (d *WordDict) Search(w string) bool {
+    var dfs func(n *Trie, i int) bool
+    dfs = func(n *Trie, i int) bool {
+        if n == nil { return false }
+        if i == len(w) { return n.isWord }
+        c := w[i]
+        if c == '.' {
+            for _, ch := range n.children { if ch != nil &amp;&amp; dfs(ch, i+1) { return true } }
+            return false
+        }
+        return dfs(n.children[c-'a'], i+1)
+    }
+    return dfs(d.root, 0)
+}
+</pre>
+
+    <h2>Maximum XOR of Two Numbers — binary trie</h2>
+<pre data-lang="go">// Insert each number bit-by-bit (MSB to LSB, 32 bits) into a trie with 2 children.
+// To maximize XOR for x, greedily pick the opposite bit at each level if present.
+</pre>
+
+    <h2>Autocomplete with frequency</h2>
+    <ul>
+      <li>Store top-K (word, freq) pairs at every node that lies on any of its descendants' top-K paths.</li>
+      <li>On query: descend to prefix node, return its top-K cache. O(L + K) per query.</li>
+      <li>Update: on insertion, walk up from leaf updating top-K caches.</li>
+    </ul>
+
+    <h2 data-cram="essential">Classic problems</h2>
+    <table>
+      <thead><tr><th>Problem</th><th>Trick</th></tr></thead>
+      <tbody>
+        <tr><td>Implement Trie</td><td>Reference impl</td></tr>
+        <tr><td>Add and Search Word ('.' wildcard)</td><td>DFS over children for '.'</td></tr>
+        <tr><td>Word Search II</td><td>Trie + DFS, prune dead branches</td></tr>
+        <tr><td>Replace Words</td><td>Insert dict, scan input replacing prefix matches</td></tr>
+        <tr><td>Maximum XOR of Two Numbers</td><td>Binary trie, greedy opposite bit</td></tr>
+        <tr><td>Concatenated Words</td><td>Trie + DP on word being decomposed</td></tr>
+        <tr><td>Design Search Autocomplete System</td><td>Trie + top-K cache per node</td></tr>
+        <tr><td>Stream of Characters</td><td>Reverse trie of words; walk back from current</td></tr>
+        <tr><td>Longest Word in Dictionary</td><td>Insert all, BFS only if all prefixes are words</td></tr>
+        <tr><td>Map Sum Pairs</td><td>Trie node stores running sum</td></tr>
+        <tr><td>Palindrome Pairs</td><td>Reverse-trie + palindrome suffix check</td></tr>
+        <tr><td>Count Pairs With XOR in Range</td><td>Binary trie subtree counting</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Anti-patterns — what NOT to say</h2>
+    <ul>
+      <li>"I'll use a hashmap of all prefixes." Works but balloons to O(N·L²) space — trie shares prefixes.</li>
+      <li>Recursive autocomplete that re-walks the entire subtree per query — cache top-K at each node instead.</li>
+      <li>Overusing <code class="inline">map[byte]*Trie</code> for ASCII — <code class="inline">[26]*Trie</code> is faster and tighter.</li>
+      <li>Forgetting to delete nodes when removing words — memory grows monotonically. Mark <code class="inline">isWord = false</code> and prune empty nodes upward.</li>
+      <li>Using a trie when a hashmap of full words is simpler and the workload is exact-match lookup.</li>
+    </ul>
+
+    <h2 data-cram="essential">Senior interviewer follow-ups</h2>
+    <table>
+      <thead><tr><th>Probe</th><th>What they want to hear</th></tr></thead>
+      <tbody>
+        <tr><td>"Trie vs hashmap for word lookup?"</td><td>Hashmap = O(L) hashing then O(L) compare; trie = O(L) node walks but supports prefix queries naturally.</td></tr>
+        <tr><td>"How does Word Search II benefit from a trie?"</td><td>Many candidates share prefixes; we descend the trie in lock-step with the board DFS, pruning whole branches.</td></tr>
+        <tr><td>"Max XOR of two numbers — why a binary trie?"</td><td>For each x, walk the trie picking the opposite bit when possible; greedy gives the maximum XOR.</td></tr>
+        <tr><td>"Memory cost of a trie?"</td><td>Up to O(N·L·Σ) where Σ is alphabet size; mitigations: child maps, radix/Patricia compression, suffix automaton.</td></tr>
+        <tr><td>"Aho–Corasick — when?"</td><td>Multi-pattern matching in text. Build trie + failure links; scan text once in O(text + matches).</td></tr>
+      </tbody>
+    </table>
+
+    <h2 data-cram="essential">Self-check</h2>
+    <ul class="checklist" data-key="tries-check">
+      <li><input type="checkbox"/><span>I can write Trie insert, search, startsWith from memory.</span></li>
+      <li><input type="checkbox"/><span>I can implement add-and-search with '.' wildcard.</span></li>
+      <li><input type="checkbox"/><span>I can solve Word Search II with trie pruning.</span></li>
+      <li><input type="checkbox"/><span>I can build a binary trie for max-XOR-pair.</span></li>
+      <li><input type="checkbox"/><span>I can design an autocomplete with top-K cache per node.</span></li>
+      <li><input type="checkbox"/><span>I can choose between <code class="inline">[26]*Trie</code> array and <code class="inline">map[byte]*Trie</code>.</span></li>
+      <li><input type="checkbox"/><span>I can describe Aho–Corasick at a high level.</span></li>
+      <li><input type="checkbox"/><span>I know when a hashmap of words beats a trie.</span></li>
+      <li><input type="checkbox"/><span>I can solve Concatenated Words with trie + DP.</span></li>
+      <li><input type="checkbox"/><span>I can sketch radix/Patricia compression for IP-routing-style lookups.</span></li>
+    </ul>
+
+    <div class="footer">Next → <a href="graphs.html">Graphs</a></div>
+  </main>
+</div>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>

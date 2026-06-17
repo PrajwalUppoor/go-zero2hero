@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: go-backend-dev-prep
+    runtime: static
+    buildCommand: ""
+    publishPath: "."

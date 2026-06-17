@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Trees — Go: Zero → Hero</title>
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar-root"></aside>
+  <main class="main">
+    <div class="crumbs"><a href="../index.html">Home</a> / Patterns / Trees</div>
+    <section class="page-header">
+      <div>
+        <h1>Trees & BST</h1>
+        <p>Traversals, DFS recursion that returns a useful local value, level-order BFS, BST properties, and serialize/deserialize.</p>
+      </div>
+    </section>
+
+    <h2 data-cram="essential">Mental model</h2>
+    <ul>
+      <li><b>Trees are recursion's natural shape.</b> Most tree problems collapse to: "what does the parent need to know about its subtree?".</li>
+      <li><b>The "DFS returns local value, closure stores global"</b> trick handles diameter, max-path-sum, longest-univalue, balanced-check, house-robber-III.</li>
+      <li><b>Three traversals</b> matter:
+        <ul>
+          <li><b>Pre-order</b>: root before children (serialize, copy).</li>
+          <li><b>In-order</b>: left, root, right (BST = sorted output).</li>
+          <li><b>Post-order</b>: children before root (delete, aggregate).</li>
+        </ul>
+      </li>
+      <li><b>Level-order = BFS with a queue</b>. Process by levels using <code class="inline">n := len(q)</code> at the start of each iteration.</li>
+      <li><b>For BST</b>, in-order traversal is sorted, so K-th smallest, validate, recover, range queries all map to "controlled in-order".</li>
+    </ul>
+
+    <h2>Node definition</h2>
+<pre data-lang="go">type TreeNode struct {
+    Val         int
+    Left, Right *TreeNode
+}
+</pre>
+
+    <h2 data-cram="essential">Traversals — iterative & recursive</h2>
+<pre data-lang="go">// Inorder iterative (BST → sorted)
+func inorder(root *TreeNode) []int {
+    var res []int; var st []*TreeNode; cur := root
+    for cur != nil || len(st) &gt; 0 {
+        for cur != nil { st = append(st, cur); cur = cur.Left }
+        cur = st[len(st)-1]; st = st[:len(st)-1]
+        res = append(res, cur.Val)
+        cur = cur.Right
+    }
+    return res
+}
+
+// Level-order BFS
+func levelOrder(root *TreeNode) [][]int {
+    if root == nil { return nil }
+    var res [][]int
+    q := []*TreeNode{root}
+    for len(q) &gt; 0 {
+        n := len(q); level := make([]int, 0, n)
+        for i := 0; i &lt; n; i++ {
+            x := q[i]; level = append(level, x.Val)
+            if x.Left != nil  { q = append(q, x.Left) }
+            if x.Right != nil { q = append(q, x.Right) }
+        }
+        q = q[n:]
+        res = append(res, level)
+    }
+    return res
+}
+</pre>
+
+    <h2 data-cram="essential">The “return a useful local value” trick</h2>
+<pre data-lang="go">// Diameter = longest path between any two nodes.
+func diameter(root *TreeNode) int {
+    best := 0
+    var depth func(*TreeNode) int
+    depth = func(n *TreeNode) int {
+        if n == nil { return 0 }
+        l, r := depth(n.Left), depth(n.Right)
+        if l+r &gt; best { best = l + r }
+        return 1 + max(l, r)
+    }
+    depth(root)
+    return best
+}
+
+// Max Path Sum — node may "open" a path or "close" one.
+func maxPathSum(root *TreeNode) int {
+    best := math.MinInt
+    var gain func(*TreeNode) int
+    gain = func(n *TreeNode) int {
+        if n == nil { return 0 }
+        l := max(gain(n.Left), 0)
+        r := max(gain(n.Right), 0)
+        if v := n.Val + l + r; v &gt; best { best = v }
+        return n.Val + max(l, r)
+    }
+    gain(root)
+    return best
+}
+</pre>
+    <blockquote>The recursive function returns what the <em>parent</em> needs (e.g. depth, best one-sided gain). The complete answer is captured in a closure-scoped variable.</blockquote>
+
+    <h2>BST core operations</h2>
+<pre data-lang="go">// Validate BST with bounds (works for unique or non-unique semantics).
+func isValidBST(root *TreeNode) bool {
+    var dfs func(n *TreeNode, lo, hi int) bool
+    dfs = func(n *TreeNode, lo, hi int) bool {
+        if n == nil { return true }
+        if n.Val &lt;= lo || n.Val &gt;= hi { return false }
+        return dfs(n.Left, lo, n.Val) &amp;&amp; dfs(n.Right, n.Val, hi)
+    }
+    return dfs(root, math.MinInt, math.MaxInt)
+}
+
+// K-th smallest via iterative inorder (stop early).
+func kthSmallest(root *TreeNode, k int) int {
+    var st []*TreeNode; cur := root
+    for cur != nil || len(st) &gt; 0 {
+        for cur != nil { st = append(st, cur); cur = cur.Left }
+        cur = st[len(st)-1]; st = st[:len(st)-1]
+        k--; if k == 0 { return cur.Val }
+        cur = cur.Right
+    }
+    return -1
+}
+</pre>
+
+    <h2>Lowest Common Ancestor (binary tree)</h2>
+<pre data-lang="go">func lca(root, p, q *TreeNode) *TreeNode {
+    if root == nil || root == p || root == q { return root }
+    l := lca(root.Left, p, q)
+    r := lca(root.Right, p, q)
+    if l != nil &amp;&amp; r != nil { return root }
+    if l != nil { return l }
+    return r
+}
+</pre>
+    <ul>
+      <li>In a <b>BST</b>, walk down: if both p, q &lt; node go left; if both &gt; node go right; else current is LCA. O(h).</li>
+    </ul>
+
+    <h2>Construct from traversals</h2>
+<pre data-lang="go">// preorder + inorder uniquely determines a tree.
+func build(pre, in []int) *TreeNode {
+    idx := map[int]int{}
+    for i, v := range in { idx[v] = i }
+    pi := 0
+    var rec func(l, r int) *TreeNode
+    rec = func(l, r int) *TreeNode {
+        if l &gt; r { return nil }
+        v := pre[pi]; pi++
+        m := idx[v]
+        return &amp;TreeNode{Val: v, Left: rec(l, m-1), Right: rec(m+1, r)}
+    }
+    return rec(0, len(in)-1)
+}
+</pre>
+
+    <h2>Serialize / deserialize</h2>
+    <ul>
+      <li>Pre-order with null markers — works for any binary tree.</li>
+      <li>For BST, you can skip nulls (bounds reconstruct structure).</li>
+      <li>Level-order is common in LeetCode I/O.</li>
+    </ul>
+
+    <h2 data-cram="essential">Classic problems</h2>
+    <table>
+      <thead><tr><th>Problem</th><th>Trick</th></tr></thead>
+      <tbody>
+        <tr><td>Maximum Depth · Symmetric · Same · Invert</td><td>Recursive structural dispatch</td></tr>
+        <tr><td>Level Order / Zigzag / Right Side View</td><td>BFS with level batching</td></tr>
+        <tr><td>Binary Tree Diameter</td><td>Closure best + return depth</td></tr>
+        <tr><td>Maximum Path Sum</td><td>Return one-sided gain; record l+r+val</td></tr>
+        <tr><td>Validate BST</td><td>Recurse with (lo, hi) bounds</td></tr>
+        <tr><td>K-th Smallest in BST</td><td>Iterative in-order, count down</td></tr>
+        <tr><td>Recover BST</td><td>In-order; find two swapped nodes</td></tr>
+        <tr><td>LCA (general / BST)</td><td>Post-order: l != nil &amp;&amp; r != nil</td></tr>
+        <tr><td>Construct from Pre+In / In+Post / Pre+Post</td><td>Recursive partition with index map</td></tr>
+        <tr><td>Serialize &amp; Deserialize Binary Tree</td><td>Pre-order with null markers</td></tr>
+        <tr><td>Path Sum I / II / III</td><td>Recursion / prefix-sum map for III</td></tr>
+        <tr><td>House Robber III</td><td>Pair (rob, notRob) per node</td></tr>
+        <tr><td>Binary Tree Maximum Width</td><td>BFS with index numbering</td></tr>
+        <tr><td>Boundary of Binary Tree</td><td>Three traversals stitched</td></tr>
+        <tr><td>Vertical Order Traversal</td><td>Map of column → list (sorted by row)</td></tr>
+        <tr><td>Cousins / Distance K from Target</td><td>BFS with parent map</td></tr>
+        <tr><td>Count Good Nodes / Sum Root-to-Leaf</td><td>DFS with running max / accumulator</td></tr>
+        <tr><td>All Nodes Distance K from Target</td><td>Build parent map, BFS from target</td></tr>
+        <tr><td>Subtree of Another Tree</td><td>Hash subtree serialization or O(mn) recurse</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Anti-patterns — what NOT to say</h2>
+    <ul>
+      <li>"I'll modify global state across recursive calls." Closure variables only — globals don't reset between test cases.</li>
+      <li>Recursive depth-first on adversarial skewed trees — stack overflow at ~10⁵ depth. Switch to iterative + explicit stack.</li>
+      <li>Treating "binary tree" and "BST" interchangeably. BST gives you order; binary tree doesn't.</li>
+      <li>Using <code class="inline">int</code> bounds without min/max for Validate BST — pass <code class="inline">math.MinInt</code>/<code class="inline">MaxInt</code> sentinels.</li>
+      <li>Returning the wrong thing from the recursive helper — it should be the value the parent needs, not the answer itself.</li>
+    </ul>
+
+    <h2 data-cram="essential">Senior interviewer follow-ups</h2>
+    <table>
+      <thead><tr><th>Probe</th><th>What they want to hear</th></tr></thead>
+      <tbody>
+        <tr><td>"Iterative in-order traversal — how?"</td><td>Stack: while node, push and go left; pop, visit, go right.</td></tr>
+        <tr><td>"Why does recursion work for LCA without storing parent pointers?"</td><td>Each subtree returns a non-nil ancestor of any contained target; the first node where both subtrees return non-nil is the LCA.</td></tr>
+        <tr><td>"Serialize/deserialize: why pre-order with nulls?"</td><td>Unique reconstruction with one pass; in-order alone doesn't work without the structural nulls.</td></tr>
+        <tr><td>"Validate BST without bounds?"</td><td>In-order traversal must produce strictly increasing sequence.</td></tr>
+        <tr><td>"K-th smallest with frequent updates?"</td><td>Augmented BST with subtree sizes (or fenwick over inserts).</td></tr>
+        <tr><td>"How to BFS without a queue (memory tight)?"</td><td>Morris-like traversal with threading; iterative DFS with stack works for most.</td></tr>
+      </tbody>
+    </table>
+
+    <h2 data-cram="essential">Self-check</h2>
+    <ul class="checklist" data-key="trees-check">
+      <li><input type="checkbox"/><span>I can write iterative in-order from memory.</span></li>
+      <li><input type="checkbox"/><span>I can solve Diameter and Max Path Sum with the local-value trick.</span></li>
+      <li><input type="checkbox"/><span>I can validate a BST with bounds.</span></li>
+      <li><input type="checkbox"/><span>I can write LCA for general binary tree and BST.</span></li>
+      <li><input type="checkbox"/><span>I can serialize/deserialize a binary tree.</span></li>
+      <li><input type="checkbox"/><span>I can write level-order BFS that batches by level.</span></li>
+      <li><input type="checkbox"/><span>I can construct a tree from pre+in or in+post traversals.</span></li>
+      <li><input type="checkbox"/><span>I can solve House Robber III with (rob, notRob) returns.</span></li>
+      <li><input type="checkbox"/><span>I can find all nodes distance K with parent map + BFS.</span></li>
+      <li><input type="checkbox"/><span>I know when to use iterative + stack vs recursion (deep trees).</span></li>
+    </ul>
+
+    <div class="footer">Next → <a href="tries.html">Tries</a></div>
+  </main>
+</div>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>

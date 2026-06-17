@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Binary Search — Go: Zero → Hero</title>
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar-root"></aside>
+  <main class="main">
+    <div class="crumbs"><a href="../index.html">Home</a> / Patterns / Binary Search</div>
+    <section class="page-header">
+      <div>
+        <h1>Binary Search</h1>
+        <p>If you can phrase the question as <em>“what is the smallest x such that P(x) is true?”</em>, you can binary-search the answer space — even when the input array is unsorted.</p>
+      </div>
+    </section>
+
+    <h2 data-cram="essential">Mental model</h2>
+    <ul>
+      <li><b>Binary search isn't about sorted arrays — it's about <i>monotonic predicates</i>.</b> If <code class="inline">P(x)</code> is true for some range and false for the complement (or vice versa), you can binary-search the boundary.</li>
+      <li><b>Three flavors</b>:
+        <ol>
+          <li><b>Index in a sorted array</b> (<code class="inline">sort.Search</code>, <code class="inline">slices.BinarySearch</code>).</li>
+          <li><b>Predicate-driven (search the answer)</b> — pick a feasibility function and binary-search the range of possible answers.</li>
+          <li><b>Modified arrays</b> (rotated, mountain, peak) — search with <i>local</i> monotonicity.</li>
+        </ol>
+      </li>
+      <li><b>Always use the half-open form</b> <code class="inline">[lo, hi)</code> and <code class="inline">m = lo + (hi-lo)/2</code> to avoid overflow and off-by-ones.</li>
+      <li><b>If you can't make the loop terminate, you have the wrong invariant.</b> Pin down what's true at every iteration before debugging.</li>
+    </ul>
+
+    <h2 data-cram="essential">The two canonical templates</h2>
+<pre data-lang="go">// 1) Find lower bound (smallest i with a[i] &gt;= target). Half-open [lo, hi).
+func lowerBound(a []int, target int) int {
+    lo, hi := 0, len(a)
+    for lo &lt; hi {
+        m := lo + (hi-lo)/2
+        if a[m] &lt; target { lo = m + 1 } else { hi = m }
+    }
+    return lo
+}
+
+// 2) Predicate-based: smallest x in [lo, hi] with ok(x).
+func searchAnswer(lo, hi int, ok func(int) bool) int {
+    for lo &lt; hi {
+        m := lo + (hi-lo)/2
+        if ok(m) { hi = m } else { lo = m + 1 }
+    }
+    return lo
+}
+</pre>
+    <blockquote>Compute mid as <code class="inline">lo + (hi-lo)/2</code> to avoid overflow. Use the half-open form <code class="inline">[lo, hi)</code> to keep updates symmetric.</blockquote>
+
+    <h2>Stdlib: <code class="inline">sort.Search</code></h2>
+<pre data-lang="go">// Returns smallest i in [0, n) where f(i) is true; n if none.
+i := sort.Search(len(a), func(i int) bool { return a[i] &gt;= target })
+</pre>
+
+    <h2>Search a rotated sorted array</h2>
+<pre data-lang="go">func search(a []int, t int) int {
+    lo, hi := 0, len(a)-1
+    for lo &lt;= hi {
+        m := lo + (hi-lo)/2
+        if a[m] == t { return m }
+        if a[lo] &lt;= a[m] { // left half sorted
+            if a[lo] &lt;= t &amp;&amp; t &lt; a[m] { hi = m - 1 } else { lo = m + 1 }
+        } else {           // right half sorted
+            if a[m] &lt; t &amp;&amp; t &lt;= a[hi] { lo = m + 1 } else { hi = m - 1 }
+        }
+    }
+    return -1
+}
+</pre>
+
+    <h2>Binary search on the answer</h2>
+<pre data-lang="go">// Capacity to ship within D days.
+func shipWithinDays(weights []int, D int) int {
+    lo, hi := 0, 0
+    for _, w := range weights { if w &gt; lo { lo = w }; hi += w }
+    ok := func(cap int) bool {
+        days, cur := 1, 0
+        for _, w := range weights {
+            if cur+w &gt; cap { days++; cur = 0 }
+            cur += w
+        }
+        return days &lt;= D
+    }
+    for lo &lt; hi {
+        m := lo + (hi-lo)/2
+        if ok(m) { hi = m } else { lo = m + 1 }
+    }
+    return lo
+}
+</pre>
+
+    <h2>Median of two sorted arrays — O(log min(m,n))</h2>
+<pre data-lang="go">// Partition the smaller array; ensure left side has (m+n+1)/2 elements;
+// adjust so maxLeft1 &lt;= minRight2 and maxLeft2 &lt;= minRight1.
+</pre>
+
+    <h2 data-cram="essential">Must-do problems</h2>
+    <table>
+      <thead><tr><th>Problem</th><th>Predicate / Idea</th><th>Time</th></tr></thead>
+      <tbody>
+        <tr><td>Find First &amp; Last Position</td><td>Lower-bound + upper-bound</td><td>O(log n)</td></tr>
+        <tr><td>Search in Rotated Sorted Array (I &amp; II)</td><td>Identify sorted half each step</td><td>O(log n) / O(n) worst</td></tr>
+        <tr><td>Find Minimum in Rotated Sorted Array</td><td>Compare mid to right</td><td>O(log n)</td></tr>
+        <tr><td>Find Peak Element</td><td>Compare <code class="inline">a[m]</code> to <code class="inline">a[m+1]</code></td><td>O(log n)</td></tr>
+        <tr><td>Capacity to Ship within D Days</td><td>Search answer; feasibility = simulate</td><td>O(n log Σ)</td></tr>
+        <tr><td>Koko Eating Bananas</td><td>Search rate; feasibility = ⌈piles/k⌉ ≤ H</td><td>O(n log max)</td></tr>
+        <tr><td>Split Array Largest Sum</td><td>Search max-sum; feasibility = greedy split</td><td>O(n log Σ)</td></tr>
+        <tr><td>Aggressive Cows / Allocate Books</td><td>Search min-distance / max-pages</td><td>O(n log Σ)</td></tr>
+        <tr><td>Median of Two Sorted Arrays</td><td>Partition smaller array</td><td>O(log min(m,n))</td></tr>
+        <tr><td>Search a 2D Matrix I/II</td><td>Treat as 1D sorted / staircase</td><td>O(log mn) / O(m+n)</td></tr>
+        <tr><td>Single Element in Sorted Array</td><td>Mid index parity</td><td>O(log n)</td></tr>
+        <tr><td>Sqrt(x) / Pow(x, n)</td><td>Bitwise / binary descent</td><td>O(log n)</td></tr>
+        <tr><td>Time-Based Key-Value Store</td><td>Binary search timestamps per key</td><td>O(log n)</td></tr>
+        <tr><td>Find K Closest Elements</td><td>Binary search the window's left index</td><td>O(log n + k)</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Anti-patterns — what NOT to say</h2>
+    <ul>
+      <li>Writing <code class="inline">m = (lo + hi) / 2</code> — overflow on huge inputs. Use <code class="inline">lo + (hi-lo)/2</code>.</li>
+      <li>Two different update rules in one loop: <code class="inline">lo = m</code> AND <code class="inline">hi = m</code> — infinite loop.</li>
+      <li>Searching the array when the problem is "find the minimum X such that we can do Y" — that's an answer-search, not an array-search.</li>
+      <li>Hand-rolling lower/upper bound when <code class="inline">sort.Search</code> / <code class="inline">slices.BinarySearchFunc</code> exist.</li>
+      <li>Reading <code class="inline">a[m]</code> without bounds-checking after manipulating <code class="inline">hi</code>.</li>
+    </ul>
+
+    <h2 data-cram="essential">Senior interviewer follow-ups</h2>
+    <table>
+      <thead><tr><th>Probe</th><th>What they want to hear</th></tr></thead>
+      <tbody>
+        <tr><td>"How do you decide between <code class="inline">[lo, hi)</code> and <code class="inline">[lo, hi]</code>?"</td><td>Pick one and stay consistent in a problem. Half-open avoids most off-by-ones.</td></tr>
+        <tr><td>"How do you binary-search on a function f(x) instead of an array?"</td><td>Find the monotonic predicate; bisect on the answer-range. Worked example: Koko, Capacity to Ship, Allocate Books.</td></tr>
+        <tr><td>"What if there are duplicates in a rotated array?"</td><td>Worst case O(n) — when <code class="inline">a[lo] == a[mid] == a[hi]</code>, you can only safely shrink one side by 1.</td></tr>
+        <tr><td>"Why is binary search not monotonic in floating point?"</td><td>Termination must use an epsilon or a fixed iteration count, not equality.</td></tr>
+        <tr><td>"Find first bad version with min API calls?"</td><td>Classic <code class="inline">sort.Search</code> — return the first index where the predicate flips.</td></tr>
+        <tr><td>"Lower bound vs upper bound — same code?"</td><td>Same binary search; predicate flips: <code class="inline">a[m] &gt;= target</code> for lower, <code class="inline">a[m] &gt; target</code> for upper.</td></tr>
+      </tbody>
+    </table>
+
+    <h2 data-cram="essential">Pitfalls</h2>
+    <ul>
+      <li>Infinite loops when boundary updates aren't tightened (e.g. <code class="inline">lo = m</code> with even mid).</li>
+      <li>Forgetting that <code class="inline">sort.Search</code> returns <code class="inline">n</code> when no element satisfies — always check.</li>
+      <li>Searching duplicates: prefer lower bound + upper bound rather than a found-or-not loop.</li>
+      <li>Computing mid as <code class="inline">(lo+hi)/2</code> with int overflow on edge sizes.</li>
+      <li>Using <code class="inline">==</code> on floats — always epsilon or iteration cap.</li>
+    </ul>
+
+    <h2 data-cram="essential">Self-check</h2>
+    <ul class="checklist" data-key="binary-search-check">
+      <li><input type="checkbox"/><span>I can write lower-bound and upper-bound from memory.</span></li>
+      <li><input type="checkbox"/><span>I can binary-search on the answer with a feasibility predicate.</span></li>
+      <li><input type="checkbox"/><span>I can search a rotated sorted array (no duplicates) in O(log n).</span></li>
+      <li><input type="checkbox"/><span>I can find the minimum in a rotated sorted array.</span></li>
+      <li><input type="checkbox"/><span>I can solve Koko Eating Bananas / Capacity to Ship / Split Array Largest Sum.</span></li>
+      <li><input type="checkbox"/><span>I know the partition trick for Median of Two Sorted Arrays.</span></li>
+      <li><input type="checkbox"/><span>I never write <code class="inline">(lo+hi)/2</code> — always <code class="inline">lo + (hi-lo)/2</code>.</span></li>
+      <li><input type="checkbox"/><span>I can use <code class="inline">sort.Search</code> with a custom predicate.</span></li>
+      <li><input type="checkbox"/><span>I know how duplicates degrade rotated search to O(n).</span></li>
+      <li><input type="checkbox"/><span>I can binary-search a float answer with epsilon termination.</span></li>
+    </ul>
+
+    <div class="footer">Next → <a href="sorting.html">Sorting</a></div>
+  </main>
+</div>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>

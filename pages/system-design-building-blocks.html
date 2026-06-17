@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>System Design Building Blocks — Go: Zero → Hero</title>
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar-root"></aside>
+  <main class="main">
+    <div class="crumbs"><a href="../index.html">Home</a> / System Design / Building blocks</div>
+    <section class="page-header">
+      <div>
+        <h1>System Design Building Blocks</h1>
+        <p>The 12 components every senior-level design draws from. Know what each does, its failure modes, and how to scale it.</p>
+      </div>
+    </section>
+
+    <h2 data-cram="essential">Mental model</h2>
+    <ul>
+      <li><b>The 12 building blocks</b>: DNS · CDN · Load Balancer · API Gateway · Application Servers · Cache · Databases · Queues · Search · Object Storage · Stream Processing · Batch &amp; Schedulers.</li>
+      <li><b>Every senior design</b> picks the right block, sizes it, lists its failure modes, and articulates how it scales.</li>
+      <li><b>Layer locality matters</b>: closer-to-user (CDN, edge cache) handles read amplification; closer-to-data (DB, search) handles write amplification.</li>
+      <li><b>Every block needs an SLO</b>; each block's SLO chains into the next.</li>
+    </ul>
+
+    <h2 data-cram="essential">1. DNS</h2>
+    <ul>
+      <li>Translates hostnames to IPs. TTL controls cache; use low TTL for failover, high TTL for performance.</li>
+      <li>GeoDNS / latency-based routing (Route 53, NS1) steers users to nearest region.</li>
+    </ul>
+
+    <h2>2. CDN</h2>
+    <ul>
+      <li>Edge cache for static + cacheable dynamic content; reduces RTT and origin load.</li>
+      <li>Cache-control headers, ETags, signed URLs for private content.</li>
+      <li>Edge compute (Cloudflare Workers, Lambda@Edge) for personalization at the edge.</li>
+    </ul>
+
+    <h2 data-cram="essential">3. Load Balancer</h2>
+    <table>
+      <thead><tr><th></th><th>L4 (TCP)</th><th>L7 (HTTP)</th></tr></thead>
+      <tbody>
+        <tr><td>Routing</td><td>IP/port, round-robin, least-conn</td><td>URL/header/cookie based</td></tr>
+        <tr><td>Examples</td><td>AWS NLB, HAProxy TCP</td><td>AWS ALB, Envoy, Nginx, Traefik</td></tr>
+        <tr><td>Use</td><td>High throughput, opaque protocols</td><td>Microservice routing, canary</td></tr>
+      </tbody>
+    </table>
+    <ul>
+      <li>Health checks + outlier detection + connection draining.</li>
+      <li>Sticky sessions vs stateless: prefer stateless with external session store.</li>
+    </ul>
+
+    <h2>4. API Gateway</h2>
+    <ul>
+      <li>Single entry point: authn, rate limiting, request transformation, routing to microservices.</li>
+      <li>Pairs with a service mesh (Envoy/Istio/Linkerd) for east-west traffic.</li>
+    </ul>
+
+    <h2>5. Application servers (in Go)</h2>
+    <ul>
+      <li>Stateless replicas behind LB; horizontal scale by adding pods.</li>
+      <li>One graceful-shutdown hook; reuse <code class="inline">http.Client</code>; bound goroutines.</li>
+      <li>Use a worker pool / errgroup for fan-out to downstream services.</li>
+    </ul>
+
+    <h2 data-cram="essential">6. Cache</h2>
+    <ul>
+      <li>Local (per-instance LRU) → distributed (Redis/Memcached) → CDN.</li>
+      <li>Eviction: LRU, LFU, TTL, ARC. Pick based on workload (recency vs frequency).</li>
+      <li>Write patterns: <b>read-through</b>, <b>write-through</b>, <b>write-back</b>, <b>cache-aside</b> (most common).</li>
+      <li>Invalidation strategies: TTL only, explicit invalidate, key versioning, write-through with tags.</li>
+      <li><b>Stampede protection</b>: singleflight, request coalescing, jittered TTLs, probabilistic early refresh.</li>
+    </ul>
+
+    <h2 data-cram="essential">7. Databases</h2>
+    <p>See the <a href="databases.html">deep dive</a>. Headlines:</p>
+    <ul>
+      <li>OLTP (PG, MySQL) for transactions; OLAP (Snowflake, BigQuery) for analytics.</li>
+      <li>Wide-column (Cassandra, ScyllaDB) for high write throughput.</li>
+      <li>Document (Mongo, DynamoDB) for flexible schemas; KV (Redis) for hot paths.</li>
+      <li>Graph (Neo4j) when traversals dominate.</li>
+    </ul>
+
+    <h2 data-cram="essential">8. Queues & event brokers</h2>
+    <ul>
+      <li>Kafka — high-throughput partitioned log; ordering within a partition.</li>
+      <li>RabbitMQ — flexible routing, lower throughput, easier semantics.</li>
+      <li>SQS / Pub/Sub — managed, simple, fan-out via topics.</li>
+      <li>Delivery: at-most-once, at-least-once, exactly-once (idempotency + transactional outbox).</li>
+    </ul>
+
+    <h2>9. Search</h2>
+    <ul>
+      <li>Elasticsearch / OpenSearch — inverted index + scoring (BM25).</li>
+      <li>Index pipeline: source DB → CDC → indexer → ES; control reindex windows.</li>
+      <li>Faceted search, autocomplete (edge n-grams), typo tolerance (fuzzy queries).</li>
+    </ul>
+
+    <h2>10. Object & blob storage</h2>
+    <ul>
+      <li>S3 / GCS / Azure Blob — 11 nines durability, eventual consistency on listing (S3 now strong).</li>
+      <li>Pre-signed URLs to upload/download directly from clients.</li>
+      <li>Lifecycle rules to tier to colder storage automatically.</li>
+    </ul>
+
+    <h2>11. Stream processing</h2>
+    <ul>
+      <li>Kafka Streams / Flink / Spark Streaming for windowed aggregations, joins, CEP.</li>
+      <li>Patterns: tumbling, sliding, session windows. Watermarks for late data.</li>
+    </ul>
+
+    <h2>12. Batch & schedulers</h2>
+    <ul>
+      <li>Airflow / Argo / Temporal for workflows and retries.</li>
+      <li>Idempotent jobs + checkpoints + DLQs.</li>
+    </ul>
+
+    <h2>Cross-cutting: load balancing strategies</h2>
+    <ul>
+      <li>Round-robin · weighted · least-connections · least-time</li>
+      <li>Consistent hashing (sticky to a backend without sessions; minimal remap on add/remove)</li>
+      <li>Power-of-two-choices: sample 2 backends, pick the less-loaded — near-optimal with O(1) overhead</li>
+    </ul>
+
+    <h2 data-cram="essential">Replication & partitioning</h2>
+    <ul>
+      <li><b>Replication</b>: leader-follower (PG, MySQL), multi-leader (Cosmos), leaderless (Dynamo/Cassandra with quorum R+W&gt;N).</li>
+      <li><b>Partitioning (sharding)</b>: by hash (uniform but range queries hard), by range (range queries easy but hot spots), by directory (lookup service).</li>
+      <li>Rebalancing: fixed virtual buckets per node (Cassandra vnodes, Redis hash slots) to avoid massive reshuffles.</li>
+    </ul>
+
+    <h2>Networking essentials</h2>
+    <ul>
+      <li>TCP vs UDP; HTTP/1.1 vs HTTP/2 (multiplexing) vs HTTP/3 (QUIC over UDP).</li>
+      <li>gRPC for service-to-service (Protobuf, streaming).</li>
+      <li>WebSockets / SSE for server push.</li>
+      <li>Connection pooling (always), keep-alive (almost always).</li>
+    </ul>
+
+    <h2>Anti-patterns — what NOT to say</h2>
+    <ul>
+      <li>"Add a load balancer" without specifying L4 vs L7.</li>
+      <li>"Cache it" without picking local-LRU vs Redis vs CDN.</li>
+      <li>"Sticky sessions" — always justify; usually a smell.</li>
+      <li>Skipping the API gateway and exposing services directly to clients.</li>
+      <li>Treating object storage as a database (no transactions, no queries).</li>
+      <li>Ignoring DNS as a part of failover plans.</li>
+    </ul>
+
+    <h2 data-cram="essential">Self-check</h2>
+    <ul class="checklist" data-key="building-blocks-check">
+      <li><input type="checkbox"/><span>I can name all 12 building blocks and what each does.</span></li>
+      <li><input type="checkbox"/><span>I can pick L4 vs L7 load balancer with reasoning.</span></li>
+      <li><input type="checkbox"/><span>I can explain consistent hashing and virtual nodes.</span></li>
+      <li><input type="checkbox"/><span>I know power-of-two-choices load balancing.</span></li>
+      <li><input type="checkbox"/><span>I can pick the right cache layer (local / distributed / CDN) per workload.</span></li>
+      <li><input type="checkbox"/><span>I can pick the right DB family (relational / document / wide-column / KV / graph / search).</span></li>
+      <li><input type="checkbox"/><span>I know HTTP/1.1 vs 2 vs 3 differences.</span></li>
+      <li><input type="checkbox"/><span>I can use signed URLs for direct uploads to object storage.</span></li>
+      <li><input type="checkbox"/><span>I can describe stream processing windows (tumbling, sliding, session).</span></li>
+      <li><input type="checkbox"/><span>I can describe each block's failure modes and recovery.</span></li>
+    </ul>
+
+    <div class="footer">Next → <a href="databases.html">Databases & storage</a></div>
+  </main>
+</div>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Flashcards — Go: Zero → Hero</title>
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar-root"></aside>
+  <main class="main">
+    <div class="crumbs"><a href="../index.html">Home</a> / Flashcards</div>
+    <section class="page-header">
+      <div>
+        <h1>Flashcards</h1>
+        <p>50+ Q&amp;A across Go, concurrency, patterns and system design. Click the card or hit <span class="kbd">Space</span> to flip. Progress is saved in your browser.</p>
+      </div>
+      <div class="kpi"><div class="num" id="fc-num">—</div><div class="lbl">cards</div></div>
+    </section>
+
+    <div class="fc-toolbar">
+      <label>Category
+        <select id="fc-cat"></select>
+      </label>
+      <label style="display:inline-flex;align-items:center;gap:6px;">
+        <input type="checkbox" id="fc-hide-known" /> Hide known
+      </label>
+      <button class="btn ghost" id="fc-shuffle">Shuffle (S)</button>
+      <button class="btn ghost" id="fc-reset">Reset known</button>
+      <span class="fc-progress" id="fc-progress">0 / 0</span>
+    </div>
+
+    <div class="flashcard" id="flashcard">
+      <div class="inner">
+        <div class="face front">
+          <div class="meta" style="color:var(--text-dim);font-size:12px;text-transform:uppercase;letter-spacing:1px;"></div>
+          <div class="q">Loading…</div>
+          <div style="margin-top:auto;color:var(--text-dim);font-size:12px;">Click / Space to flip · ← → to navigate · K know · U unknown</div>
+        </div>
+        <div class="face back">
+          <div class="a"></div>
+          <div style="margin-top:auto;color:var(--text-dim);font-size:12px;">Click to flip back · K to mark known</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="fc-toolbar" style="justify-content:space-between;">
+      <div>
+        <button class="btn secondary" id="fc-prev">← Prev</button>
+        <button class="btn secondary" id="fc-flip">Flip (Space)</button>
+        <button class="btn secondary" id="fc-next">Next →</button>
+      </div>
+      <div>
+        <button class="btn ghost" id="fc-unknown">Unknown (U)</button>
+        <button class="btn" id="fc-known">Known (K)</button>
+      </div>
+    </div>
+
+    <h2>How to use</h2>
+    <ul>
+      <li><b>5-min daily loop</b> — pick a category, flip 10 cards, mark Known/Unknown honestly.</li>
+      <li><b>Pre-interview cram</b> — filter by the topic you'll be grilled on; hide Known to focus on weak spots.</li>
+      <li><b>Spaced practice</b> — come back weekly; cards you marked Unknown will keep showing up until they stick.</li>
+    </ul>
+
+    <blockquote class="ok"><b>Pro tip:</b> if you can't explain the answer in your own words to a rubber duck, mark it Unknown — recognition ≠ recall.</blockquote>
+
+    <h2>Want more?</h2>
+    <p style="color:var(--text-dim);">Add your own cards by editing <code class="inline">assets/js/flashcards.js</code> — append objects of shape <code class="inline">{ cat, q, a }</code>. They appear automatically.</p>
+
+    <div class="footer">Pair with → <a href="cheatsheet.html">Last-minute cheatsheet</a> · <a href="leetcode-tricks.html">LeetCode tricks</a></div>
+  </main>
+</div>
+<script src="../assets/js/site.js"></script>
+<script src="../assets/js/flashcards.js"></script>
+<script>
+  // Reflect total count in the KPI badge once flashcards are loaded.
+  document.addEventListener("DOMContentLoaded", () => {
+    const el = document.getElementById("fc-num");
+    if (el && typeof FLASHCARDS !== "undefined") el.textContent = FLASHCARDS.length;
+  });
+</script>
+</body>
+</html>

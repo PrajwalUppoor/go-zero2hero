@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Caching — Go: Zero → Hero</title>
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar-root"></aside>
+  <main class="main">
+    <div class="crumbs"><a href="../index.html">Home</a> / System Design / Caching</div>
+    <section class="page-header">
+      <div>
+        <h1>Caching</h1>
+        <p>The single highest-leverage performance lever — and the single most common source of bugs in distributed systems.</p>
+      </div>
+    </section>
+
+    <h2 data-cram="essential">Mental model</h2>
+    <ul>
+      <li><b>Cache where the read pattern is skewed</b> (a few keys account for most traffic). Uniform random reads don't benefit much.</li>
+      <li><b>The trade-off triangle</b>: latency ↓, throughput ↑, consistency ↓. Pick which to sacrifice based on the data.</li>
+      <li><b>Six failure modes</b> to enumerate: thundering herd, stampede on restart, hot key, big key, cache penetration, cache avalanche.</li>
+      <li><b>Invalidation is the unsolved problem</b>. TTL is your default; explicit invalidation is best-effort; versioned keys sidestep races.</li>
+      <li><b>Multi-tier</b> when justified: process-local LRU (sub-µs) → shared Redis (~1 ms) → DB (10+ ms).</li>
+    </ul>
+
+    <h2 data-cram="essential">Where to cache</h2>
+    <ol>
+      <li><b>Client</b> — HTTP cache headers (Cache-Control, ETag, max-age).</li>
+      <li><b>Edge / CDN</b> — static assets and cacheable APIs.</li>
+      <li><b>API gateway</b> — short TTL for hot endpoints.</li>
+      <li><b>In-process</b> — per-instance LRU/LFU for very hot keys (sub-µs).</li>
+      <li><b>Distributed</b> — Redis/Memcached cluster shared across replicas.</li>
+      <li><b>Materialized view in DB</b> — pre-computed expensive joins.</li>
+    </ol>
+
+    <h2 data-cram="essential">Caching patterns</h2>
+    <table>
+      <thead><tr><th>Pattern</th><th>How</th><th>Trade-off</th></tr></thead>
+      <tbody>
+        <tr><td>Cache-aside (lazy)</td><td>App reads cache → on miss reads DB → writes cache. Writes go to DB and invalidate cache.</td><td>Simple, but cold start storms and possible stale data.</td></tr>
+        <tr><td>Read-through</td><td>App reads cache; cache transparently fetches from DB on miss.</td><td>Hides loader logic; requires cache to know schema.</td></tr>
+        <tr><td>Write-through</td><td>Every write goes to cache + DB synchronously.</td><td>Consistent; doubles write latency.</td></tr>
+        <tr><td>Write-back (write-behind)</td><td>Write to cache; async flush to DB.</td><td>Fastest writes; risk of data loss on cache crash.</td></tr>
+        <tr><td>Refresh-ahead</td><td>Background refresh before TTL expires.</td><td>Smooths latency; wastes work on cold keys.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Eviction policies</h2>
+    <ul>
+      <li><b>LRU</b> — drop the least-recently-used. Good for recency-skewed workloads.</li>
+      <li><b>LFU</b> — drop the least-frequently-used. Good for stable popularity.</li>
+      <li><b>ARC</b> — adaptive replacement; balances recency vs frequency.</li>
+      <li><b>TTL-based</b> — keys expire after fixed time; pair with LRU.</li>
+      <li><b>2Q / LIRS / TinyLFU</b> — modern algorithms with high hit ratios.</li>
+    </ul>
+
+    <h2>Consistency</h2>
+    <ul>
+      <li><b>Cache invalidation</b> is famously hard. Strategies:
+        <ul>
+          <li>TTL only (simplest, may serve stale).</li>
+          <li>Explicit invalidate on write (race: stale read may write back).</li>
+          <li>Versioned keys (<code class="inline">user:42:v17</code>) — new writes change the version.</li>
+          <li>Write-through + read-through with single source.</li>
+        </ul>
+      </li>
+      <li><b>Negative caching</b>: cache "not found" with a short TTL to avoid hammering DB.</li>
+      <li><b>Soft TTL / hard TTL</b>: serve stale during soft, force refresh after hard.</li>
+    </ul>
+
+    <h2 data-cram="essential">Failure modes & how to defend</h2>
+    <ul>
+      <li><b>Thundering herd</b> on miss → use <code class="inline">singleflight</code>, request coalescing, jittered TTLs.</li>
+      <li><b>Cache stampede</b> after restart → warm cache before opening LB traffic; use refresh-ahead.</li>
+      <li><b>Hot key</b> → split key across many physical keys, or replicate in local LRU.</li>
+      <li><b>Big key</b> (huge value) → split or compress; avoid blocking Redis with O(N) ops.</li>
+      <li><b>Cache penetration</b> (queries that always miss) → negative cache + bloom filter at the front.</li>
+      <li><b>Cache avalanche</b> (mass TTL expiry at once) → jitter the TTLs; staggered warm-up.</li>
+    </ul>
+
+    <h2>Go: singleflight in one snippet</h2>
+<pre data-lang="go">import "golang.org/x/sync/singleflight"
+
+var g singleflight.Group
+
+func getUser(ctx context.Context, id string) (*User, error) {
+    v, err, _ := g.Do("user:"+id, func() (any, error) {
+        if u, ok := cache.Get(id); ok { return u, nil }
+        u, err := db.Get(ctx, id)
+        if err != nil { return nil, err }
+        cache.Set(id, u, 5*time.Minute)
+        return u, nil
+    })
+    if err != nil { return nil, err }
+    return v.(*User), nil
+}
+</pre>
+
+    <h2>Redis specifics worth knowing</h2>
+    <ul>
+      <li>Data types: strings, hashes, lists, sets, sorted sets, streams, HyperLogLog, geo, bitmaps.</li>
+      <li>Sorted sets enable leaderboards, rate limiters, time-based queues.</li>
+      <li>Lua scripts are atomic — perfect for compare-and-set semantics (token-bucket limiter).</li>
+      <li>Persistence: RDB (snapshot) + AOF (append-only). Tune for RPO needs.</li>
+      <li>Cluster mode shards by hash slot (16384 slots). Use hash tags <code class="inline">{user:42}:cart</code> to keep related keys co-located.</li>
+      <li><code class="inline">SCAN</code> instead of <code class="inline">KEYS</code> in production (non-blocking).</li>
+    </ul>
+
+    <h2>Cache sizing</h2>
+    <ul>
+      <li>Working set ≈ hot key count × avg value size × replication.</li>
+      <li>Target hit ratio: 80%+ for read-heavy systems; measure with cache hit/miss metrics.</li>
+      <li>Memory headroom of 25% for fragmentation and Redis overhead.</li>
+    </ul>
+
+    <h2>Anti-patterns — what NOT to say</h2>
+    <ul>
+      <li>"Just cache it." Always specify: which keys, what TTL, how invalidated, what's the failure plan.</li>
+      <li>Same TTL for every key — leads to mass expiry (avalanche). Add jitter.</li>
+      <li>Caching writes-through without considering DB-cache divergence on write failure.</li>
+      <li>Caching mutable user-personalized data with shared keys — leak across users.</li>
+      <li>Read-modify-write back to cache without versioning — lost updates.</li>
+      <li>Reaching for Redis when an in-process LRU is the right answer (single-instance, micro-cache).</li>
+    </ul>
+
+    <h2 data-cram="essential">Senior interviewer follow-ups</h2>
+    <table>
+      <thead><tr><th>Probe</th><th>What they want to hear</th></tr></thead>
+      <tbody>
+        <tr><td>"How do you avoid stampede on a popular cold key?"</td><td>Singleflight on the loader; one in-flight request fans out; or pre-warm.</td></tr>
+        <tr><td>"How do you invalidate a cache safely?"</td><td>Versioned keys (writes change version), or write-through, or TTL + tolerable staleness.</td></tr>
+        <tr><td>"What's cache penetration vs avalanche vs stampede?"</td><td>Penetration = misses-that-always-miss (DoS); avalanche = mass simultaneous expiry; stampede = many concurrent loads on one key.</td></tr>
+        <tr><td>"Redis cluster — how do you keep related keys together?"</td><td>Hash tags <code class="inline">{user:42}:cart</code> route by tagged substring.</td></tr>
+        <tr><td>"How do you size for hit ratio?"</td><td>Sample key access frequency; the long tail's working set sets your memory floor for a target hit ratio.</td></tr>
+        <tr><td>"What's negative caching?"</td><td>Cache "not found" with a short TTL to throttle DB on missing-key DoS.</td></tr>
+        <tr><td>"Cache vs CDN — when each?"</td><td>CDN = geographic edge for static / cacheable HTTP; app-cache = within DC for dynamic data.</td></tr>
+      </tbody>
+    </table>
+
+    <h2 data-cram="essential">Self-check</h2>
+    <ul class="checklist" data-key="caching-check">
+      <li><input type="checkbox"/><span>I can name 6 cache failure modes and a mitigation for each.</span></li>
+      <li><input type="checkbox"/><span>I can explain cache-aside vs read-through vs write-through vs write-back.</span></li>
+      <li><input type="checkbox"/><span>I can use singleflight to prevent stampede.</span></li>
+      <li><input type="checkbox"/><span>I know LRU/LFU/TTL trade-offs.</span></li>
+      <li><input type="checkbox"/><span>I can size a cache from working-set + hit-ratio target.</span></li>
+      <li><input type="checkbox"/><span>I can use versioned keys to invalidate safely.</span></li>
+      <li><input type="checkbox"/><span>I know Redis hash tags for cluster co-location.</span></li>
+      <li><input type="checkbox"/><span>I always add TTL jitter.</span></li>
+      <li><input type="checkbox"/><span>I can describe when in-process LRU beats Redis.</span></li>
+      <li><input type="checkbox"/><span>I know to use SCAN, not KEYS, in production.</span></li>
+    </ul>
+
+    <div class="footer">Next → <a href="messaging.html">Messaging & queues</a></div>
+  </main>
+</div>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>

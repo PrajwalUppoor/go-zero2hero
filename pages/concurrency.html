@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Concurrency — Go: Zero → Hero</title>
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar-root"></aside>
+  <main class="main">
+    <div class="crumbs"><a href="../index.html">Home</a> / Go Language / Concurrency</div>
+    <section class="page-header">
+      <div>
+        <h1>Concurrency</h1>
+        <p>Goroutines, channels, sync primitives, context — and the patterns interviewers love: pipelines, fan-in/out, worker pools, rate limiting, singleflight, graceful shutdown.</p>
+      </div>
+    </section>
+
+    <h2 data-cram="essential">Mental model</h2>
+    <ul>
+      <li><b>Goroutine</b> = a function multiplexed onto OS threads by the runtime. Starts at <code class="inline">~2KB</code> stack and grows; an idle Go process can comfortably hold <b>hundreds of thousands</b> of them.</li>
+      <li><b>GMP scheduler</b> — <b>G</b>oroutines run on <b>M</b>achines (OS threads) bound to <b>P</b>rocessors (logical CPUs). <code class="inline">GOMAXPROCS</code> sets P-count. A goroutine yields on channel ops, syscalls, function calls (preemption since 1.14), and <code class="inline">runtime.Gosched()</code>.</li>
+      <li><b>Two flavors of synchronization</b>:
+        <ol>
+          <li><b>Channels</b> — for transferring <i>ownership</i> of data and signalling between goroutines.</li>
+          <li><b>Mutexes / atomics</b> — for protecting <i>state</i> that stays in place.</li>
+        </ol>
+        "Don't communicate by sharing memory; share memory by communicating" — but a <code class="inline">sync.Mutex</code> is often the cleaner answer. Pick the simpler tool.
+      </li>
+      <li><b>Concurrency ≠ parallelism</b>. Go gives you concurrency (independent things in progress); the runtime adds parallelism on multi-core hardware.</li>
+    </ul>
+
+    <h2 data-cram="essential">Channels — the cheat-sheet</h2>
+<pre data-lang="go">ch := make(chan int)        // unbuffered = rendezvous (sender blocks until receiver)
+ch := make(chan int, 16)    // buffered (sender blocks only when full)
+
+ch &lt;- 1                     // send  (blocks per rules above)
+v, ok := &lt;-ch               // receive; ok==false if channel is closed AND drained
+close(ch)                   // ONLY the sender(s) close; closing twice panics
+for v := range ch { ... }   // exits when channel is closed and drained
+
+select {
+case v := &lt;-in:                 handle(v)
+case out &lt;- next:               next = produce()
+case &lt;-time.After(time.Second): timeout()
+case &lt;-ctx.Done():              return ctx.Err()
+default:                        // non-blocking
+}
+</pre>
+    <blockquote>Closing a channel signals "no more values"; it is not a destructor. <b>Send on closed = panic. Receive on closed = zero value, ok=false.</b> Multiple senders? Use a separate <code class="inline">done</code> channel (or context) instead of closing the data channel.</blockquote>
+
+    <h3>Buffered vs unbuffered — when to pick which</h3>
+    <ul>
+      <li><b>Unbuffered</b>: synchronous handoff. Use for tight coordination ("I'll continue once you've got it").</li>
+      <li><b>Buffered, size=N</b>: decouples producer from consumer up to N items. Useful for batching / smoothing bursty work. <b>Don't use to "fix" deadlocks</b> — that just delays them.</li>
+      <li><b>Buffered, size=1</b>: a tiny mailbox / one-shot signal.</li>
+    </ul>
+
+    <h2 data-cram="essential">Pattern 1 — Worker pool</h2>
+    <p>Use when work items are independent and the bottleneck is CPU/IO of a single worker. Bounding fan-out is critical: unbounded <code class="inline">go f()</code> in a hot loop is the #1 way Go services fall over.</p>
+<pre data-lang="go">func worker(id int, jobs &lt;-chan Job, results chan&lt;- Result, wg *sync.WaitGroup) {
+    defer wg.Done()
+    for j := range jobs {           // exits when jobs is closed
+        results &lt;- process(j)
+    }
+}
+
+func RunPool(jobs []Job, n int) []Result {
+    in  := make(chan Job, n)
+    out := make(chan Result, n)
+    var wg sync.WaitGroup
+    for i := 0; i &lt; n; i++ {
+        wg.Add(1)
+        go worker(i, in, out, &amp;wg)
+    }
+    go func() {                     // feed
+        for _, j := range jobs { in &lt;- j }
+        close(in)
+    }()
+    go func() { wg.Wait(); close(out) }()  // close out only after all workers done
+
+    var results []Result
+    for r := range out { results = append(results, r) }
+    return results
+}
+</pre>
+    <p><b>Complexity:</b> wall-time ≈ <code class="inline">total_work / n</code>; memory ≈ <code class="inline">O(n + buffer)</code>.</p>
+
+    <h3>Worked trace — 3 jobs, 2 workers</h3>
+    <ol>
+      <li>Pool starts: w0, w1 both block on <code class="inline">&lt;-jobs</code>.</li>
+      <li>Feeder sends J1 → w0 receives; sends J2 → w1 receives; sends J3 → blocks until a worker frees.</li>
+      <li>w0 finishes J1, sends R1 to <code class="inline">out</code>, blocks on next job. Feeder unblocks, sends J3 → w0 picks up.</li>
+      <li>Feeder closes <code class="inline">in</code>. Workers each see closed channel after their current job, return.</li>
+      <li><code class="inline">wg.Wait()</code> returns, the goroutine closes <code class="inline">out</code>, the main range loop exits.</li>
+    </ol>
+
+    <h2>Pattern 2 — Pipeline (stages connected by channels)</h2>
+    <p>Each stage is a goroutine that <i>receives</i> from upstream, transforms, and <i>sends</i> downstream. Pair every send/receive with a <code class="inline">select { case ... &lt;-ctx.Done(): return }</code> so cancellation propagates and goroutines can't leak.</p>
+<pre data-lang="go">func gen(ctx context.Context, ns ...int) &lt;-chan int {
+    out := make(chan int)
+    go func() {
+        defer close(out)
+        for _, n := range ns {
+            select {
+            case out &lt;- n:
+            case &lt;-ctx.Done(): return
+            }
+        }
+    }()
+    return out
+}
+
+func sq(ctx context.Context, in &lt;-chan int) &lt;-chan int {
+    out := make(chan int)
+    go func() {
+        defer close(out)
+        for n := range in {
+            select {
+            case out &lt;- n*n:
+            case &lt;-ctx.Done(): return
+            }
+        }
+    }()
+    return out
+}
+
+// Compose: sq(ctx, sq(ctx, gen(ctx, 1,2,3,4)))
+</pre>
+
+    <h2>Pattern 3 — Fan-in / fan-out with errgroup</h2>
+    <p><code class="inline">golang.org/x/sync/errgroup</code> is the idiomatic way to launch a bounded fan-out, propagate the first error, and cancel siblings via the derived context.</p>
+<pre data-lang="go">import "golang.org/x/sync/errgroup"
+
+func FetchAll(ctx context.Context, urls []string) ([]Page, error) {
+    g, ctx := errgroup.WithContext(ctx)
+    g.SetLimit(8)                                 // fan-out cap
+    pages := make([]Page, len(urls))               // per-index write avoids locks
+    for i, u := range urls {
+        i, u := i, u                              // pin loop vars (pre Go 1.22)
+        g.Go(func() error {
+            p, err := fetch(ctx, u)
+            if err != nil { return err }          // first error cancels ctx
+            pages[i] = p
+            return nil
+        })
+    }
+    if err := g.Wait(); err != nil { return nil, err }
+    return pages, nil
+}
+</pre>
+
+    <h2>Pattern 4 — Rate limiter (token bucket)</h2>
+<pre data-lang="go">import "golang.org/x/time/rate"
+
+l := rate.NewLimiter(100, 200)              // 100 rps, burst 200
+if err := l.Wait(ctx); err != nil { return err }
+// or non-blocking: if !l.Allow() { return ErrTooManyRequests }
+// or N tokens at once: l.WaitN(ctx, 5)
+</pre>
+    <p><b>Anti-patterns:</b> hand-rolling a limiter with <code class="inline">time.Tick</code> in a loop (drift + leaks); using a buffered channel of "tokens" without refill (one-shot only).</p>
+
+    <h2>Pattern 5 — Singleflight (request coalescing)</h2>
+    <p>When N goroutines all ask for the same expensive value (cache miss stampede, deduped RPC), collapse them into one in-flight call.</p>
+<pre data-lang="go">import "golang.org/x/sync/singleflight"
+
+var g singleflight.Group
+
+func GetUser(ctx context.Context, id string) (*User, error) {
+    v, err, _ := g.Do(id, func() (any, error) {
+        return fetchUserFromDB(ctx, id)
+    })
+    if err != nil { return nil, err }
+    return v.(*User), nil
+}
+</pre>
+    <p>Use <code class="inline">DoChan</code> for select-friendly handling; <code class="inline">Forget(key)</code> to evict on negative result so the next caller retries.</p>
+
+    <h2>Pattern 6 — Graceful shutdown</h2>
+<pre data-lang="go">srv := &amp;http.Server{Addr: ":8080", Handler: mux}
+
+go func() {
+    if err := srv.ListenAndServe(); err != nil &amp;&amp; err != http.ErrServerClosed {
+        log.Fatalf("listen: %v", err)
+    }
+}()
+
+// Trap signals
+sig := make(chan os.Signal, 1)
+signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+&lt;-sig
+
+ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+defer cancel()
+if err := srv.Shutdown(ctx); err != nil {
+    log.Printf("shutdown: %v", err)
+}
+</pre>
+    <p><b>Drain order:</b> stop accepting → drain in-flight → close DB/cache pools → flush logs/metrics. Pass the same <code class="inline">ctx</code> down so workers can react.</p>
+
+    <h2>sync primitives — when to reach for what</h2>
+    <table>
+      <thead><tr><th>Primitive</th><th>When</th><th>Anti-pattern</th></tr></thead>
+      <tbody>
+        <tr><td><code class="inline">sync.Mutex</code></td><td>Protect a small critical section.</td><td>Holding across I/O or long work.</td></tr>
+        <tr><td><code class="inline">sync.RWMutex</code></td><td>Many readers, few writers (read &gt;&gt; write).</td><td>Mostly-write workloads (slower than Mutex).</td></tr>
+        <tr><td><code class="inline">sync.Once</code></td><td>Lazy singleton init.</td><td>Re-doing work after error — Once doesn't retry.</td></tr>
+        <tr><td><code class="inline">sync.WaitGroup</code></td><td>Wait for N goroutines. <code class="inline">Add</code> before <code class="inline">go</code>; <code class="inline">Done</code> deferred.</td><td>Calling <code class="inline">Add</code> from inside the goroutine — race.</td></tr>
+        <tr><td><code class="inline">sync.Cond</code></td><td>Rare. Wait for arbitrary predicate.</td><td>Almost always a channel is cleaner.</td></tr>
+        <tr><td><code class="inline">sync.Map</code></td><td>Heavy concurrent reads with disjoint keys per goroutine.</td><td>General-purpose map — slower than <code class="inline">map+Mutex</code>.</td></tr>
+        <tr><td><code class="inline">sync.Pool</code></td><td>Reuse short-lived alloc-heavy objects (buffers, decoders).</td><td>Caching long-lived state — Pool is GC-cleared anytime.</td></tr>
+        <tr><td><code class="inline">atomic.*</code></td><td>Single-word counters/flags. Use <code class="inline">atomic.Int64</code> (1.19+).</td><td>Compound state — atomicity per word ≠ per struct.</td></tr>
+      </tbody>
+    </table>
+
+    <h2 data-cram="essential">Context — propagation rules</h2>
+<pre data-lang="go">ctx, cancel := context.WithTimeout(parent, 2*time.Second)
+defer cancel()                                  // ALWAYS
+
+req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
+resp, err := http.DefaultClient.Do(req)         // honours ctx automatically
+</pre>
+    <ul>
+      <li><b>First arg, named <code class="inline">ctx</code>.</b> Never store in a struct (sole exception: <code class="inline">http.Server.BaseContext</code>-style frameworks).</li>
+      <li><b>Always <code class="inline">defer cancel()</code></b> — even on success — to release the timer/goroutine the context spawned.</li>
+      <li><code class="inline">context.Value</code> is for request-scoped <i>infrastructure</i> (trace IDs, auth, logger) — <b>not</b> optional parameters.</li>
+      <li>Cancellation is <b>cooperative</b>. A goroutine that doesn't check <code class="inline">ctx.Done()</code> will keep running. Combine with channel sends/recvs in a <code class="inline">select</code>.</li>
+      <li><code class="inline">errors.Is(err, context.Canceled)</code> vs <code class="inline">context.DeadlineExceeded</code> — distinguish "user gave up" from "we ran out of time".</li>
+    </ul>
+
+    <h2 data-cram="essential">Common deadlocks &amp; data races</h2>
+    <ul>
+      <li>Sending on an unbuffered channel with <b>no receiver in the same scheduling group</b>.</li>
+      <li>Forgetting to close a channel that drives a <code class="inline">range</code> — receivers block forever.</li>
+      <li>Multiple goroutines closing the same channel → <code class="inline">panic: close of closed channel</code>. Use <code class="inline">sync.Once</code> or invert ownership.</li>
+      <li>Concurrent map writes → <code class="inline">fatal error: concurrent map writes</code> (not a regular panic — kills the process).</li>
+      <li>Returning before <code class="inline">wg.Wait()</code>: leaked goroutines that may panic later or hold resources.</li>
+      <li>Loop variable captured in goroutine before Go 1.22 — pin with <code class="inline">i := i</code>.</li>
+      <li>Using <code class="inline">time.After</code> in a hot <code class="inline">select</code> loop — it allocates a timer per iteration. Use <code class="inline">time.NewTimer</code> + reset.</li>
+      <li><code class="inline">log.Print</code> from a panicking goroutine while another holds the log mutex — circular wait.</li>
+    </ul>
+
+    <h2>Anti-patterns — what NOT to say</h2>
+    <ul>
+      <li>"Just throw a <code class="inline">go</code> on it" — without bounding fan-out, this is how you OOM in production.</li>
+      <li>"I'll close the channel from the receiver." Closing is the sender's responsibility.</li>
+      <li>"I'll use <code class="inline">sync.Map</code> for general thread-safety." It's a niche tool; <code class="inline">map + RWMutex</code> is usually faster and simpler.</li>
+      <li>"<code class="inline">Sleep</code> until X is ready." Use channels / sync.Cond / context.</li>
+      <li>"I'll buffer the channel to avoid the deadlock." A buffer postpones the bug until production load.</li>
+      <li>"Goroutines are free." They're cheap, not free. Each holds a stack and prevents GC of captured vars.</li>
+      <li>Spawning a goroutine inside a request handler that outlives the request without a context — guaranteed leak under load.</li>
+    </ul>
+
+    <h2 data-cram="essential">Senior interviewer follow-ups</h2>
+    <table>
+      <thead><tr><th>Probe</th><th>What they want to hear</th></tr></thead>
+      <tbody>
+        <tr><td>"How does <code class="inline">select</code> choose when multiple cases are ready?"</td><td>Pseudo-randomly, to prevent starvation.</td></tr>
+        <tr><td>"What stops a goroutine you can't see anymore?"</td><td>Nothing — that's a leak. Only context cancellation, channel signals, or returning from the entry function stop it.</td></tr>
+        <tr><td>"Mutex or channel for a hot counter?"</td><td><code class="inline">atomic.Int64</code>. Mutex if you have multi-field invariants.</td></tr>
+        <tr><td>"How do you implement <code class="inline">context.WithCancel</code>?"</td><td>Embed parent's done channel; allocate a new <code class="inline">done</code> chan; <code class="inline">cancel()</code> closes it; goroutine watches both.</td></tr>
+        <tr><td>"Why does the race detector exist if Go is memory-safe?"</td><td>Memory safety prevents segfaults; data races still produce torn / stale reads. <code class="inline">go test -race</code>.</td></tr>
+        <tr><td>"How does <code class="inline">runtime.Gosched()</code> differ from <code class="inline">time.Sleep(0)</code>?"</td><td>Gosched yields P; Sleep parks the goroutine on a timer.</td></tr>
+        <tr><td>"How do you bound goroutines for incoming HTTP work?"</td><td>Worker pool with bounded queue (drop / 503 on full); or semaphore channel; or errgroup.SetLimit.</td></tr>
+        <tr><td>"What's the difference between <code class="inline">close(ch)</code> and sending a sentinel?"</td><td>Close fans out to <i>all</i> receivers and supports <code class="inline">range</code>; sentinel is per-receiver.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Idiomatic Go for concurrent code</h2>
+    <ul>
+      <li><b>Receive-only / send-only types</b> at API boundaries: <code class="inline">func consume(in &lt;-chan T)</code>, <code class="inline">func produce(out chan&lt;- T)</code>. The compiler enforces direction.</li>
+      <li><b>Return channels you create.</b> Encapsulate goroutine ownership inside the constructor; the caller can only read.</li>
+      <li><b>Prefer <code class="inline">errgroup</code> over hand-rolled WaitGroup+error</b> for fan-out work.</li>
+      <li><b>Always pair</b> <code class="inline">go f()</code> in a function with a clear shutdown story (channel close, ctx cancel, or "process lifetime").</li>
+      <li><b>Test with <code class="inline">-race</code></b> on every CI run. The race detector is sound (no false positives) but only catches races it observes — write tests that exercise concurrency.</li>
+      <li><b>Use <code class="inline">runtime/trace</code></b> for "why is this slow?" — it shows goroutine blocking, GC, and scheduler activity.</li>
+    </ul>
+
+    <h2>Senior interview prompts</h2>
+    <ul>
+      <li>Implement a bounded concurrent task runner with priority queue.</li>
+      <li>Build a request coalescer (singleflight) for identical concurrent calls — and explain when it's wrong (different per-request auth, etc.).</li>
+      <li>Implement <code class="inline">context.WithCancel</code> from primitives.</li>
+      <li>Design a goroutine-safe LRU with O(1) get/put and TTL.</li>
+      <li>Implement a fan-out broadcast: one publisher, N subscribers, slow subscribers shouldn't block fast ones.</li>
+      <li>Implement a fixed-window and sliding-window rate limiter without external libs.</li>
+      <li>Build a worker pool that supports dynamic resize without dropping in-flight work.</li>
+      <li>Explain how cancellation propagates from <code class="inline">ctx</code> down to a TCP <code class="inline">Read</code>.</li>
+    </ul>
+
+    <h2 data-cram="essential">Self-check</h2>
+    <ul class="checklist" data-key="concurrency-check">
+      <li><input type="checkbox"/><span>I can write a worker pool, pipeline, errgroup fan-out, and singleflight from memory.</span></li>
+      <li><input type="checkbox"/><span>I can explain GMP — what G, M, P are, and what triggers a goroutine yield.</span></li>
+      <li><input type="checkbox"/><span>I know which of mutex / RWMutex / atomic to pick for a hot counter (and why).</span></li>
+      <li><input type="checkbox"/><span>I always pair <code class="inline">WithCancel</code>/<code class="inline">WithTimeout</code> with <code class="inline">defer cancel()</code>.</span></li>
+      <li><input type="checkbox"/><span>I understand send-on-closed = panic, recv-on-closed = zero value + ok=false.</span></li>
+      <li><input type="checkbox"/><span>I know how to bound fan-out (errgroup.SetLimit, semaphore channel, worker pool).</span></li>
+      <li><input type="checkbox"/><span>I can implement graceful shutdown for an HTTP server (signal → ctx → Shutdown).</span></li>
+      <li><input type="checkbox"/><span>I know <code class="inline">go test -race</code> exists and run it in CI.</span></li>
+      <li><input type="checkbox"/><span>I can sketch <code class="inline">context.WithCancel</code> from primitives (chan + once).</span></li>
+      <li><input type="checkbox"/><span>I can identify the 3 most common goroutine leaks: missing ctx-check, unclosed channel range, blocking send to no-receiver.</span></li>
+      <li><input type="checkbox"/><span>I can use <code class="inline">runtime/pprof</code> goroutine profile to find a leak in production.</span></li>
+    </ul>
+
+    <div class="footer">Next → <a href="go-stdlib.html">Stdlib & idioms</a></div>
+  </main>
+</div>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>

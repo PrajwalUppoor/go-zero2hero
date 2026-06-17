@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Heaps — Go: Zero → Hero</title>
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar-root"></aside>
+  <main class="main">
+    <div class="crumbs"><a href="../index.html">Home</a> / Patterns / Heaps</div>
+    <section class="page-header">
+      <div>
+        <h1>Heaps / Priority Queue</h1>
+        <p>Anything with “k-th”, “top-K”, “merge k sorted”, “median in a stream”, or “shortest path” probably wants a heap.</p>
+      </div>
+    </section>
+
+    <h2 data-cram="essential">Mental model</h2>
+    <ul>
+      <li><b>The trigger words</b>: "k-th", "top-K", "smallest/largest so far", "merge K sorted", "median in stream", "shortest path", "reorganize".</li>
+      <li><b>Heap = priority queue with O(log n) push/pop and O(1) peek</b>. Backed by a binary heap in an array (Go's <code class="inline">container/heap</code>).</li>
+      <li><b>Three high-leverage patterns</b>:
+        <ol>
+          <li><b>Heap of size K</b> — keep the top-K with O(n log k).</li>
+          <li><b>Two heaps</b> — max-heap of lower half + min-heap of upper half for stream median.</li>
+          <li><b>Lazy deletion</b> — push fresh entries with timestamps/version, skip stale tops on pop.</li>
+        </ol>
+      </li>
+      <li><b>Don't reach for a heap when bucket sort or counting works</b>. Top-K-frequent in O(n) beats O(n log k) when the value range is bounded.</li>
+      <li><b>For Dijkstra</b>, the heap stores <code class="inline">(dist, node)</code>; skip the entry if it doesn't match the current best dist (lazy deletion).</li>
+    </ul>
+
+    <h2 data-cram="essential">The Go boilerplate (copy once, customize)</h2>
+<pre data-lang="go">import "container/heap"
+
+type IntHeap []int                            // min-heap
+func (h IntHeap) Len() int            { return len(h) }
+func (h IntHeap) Less(i, j int) bool  { return h[i] &lt; h[j] }
+func (h IntHeap) Swap(i, j int)       { h[i], h[j] = h[j], h[i] }
+func (h *IntHeap) Push(x any)         { *h = append(*h, x.(int)) }
+func (h *IntHeap) Pop() any           { old := *h; n := len(old); x := old[n-1]; *h = old[:n-1]; return x }
+
+h := &amp;IntHeap{}
+heap.Init(h)
+heap.Push(h, 5)
+top := (*h)[0]
+heap.Pop(h)
+</pre>
+    <blockquote>Flip <code class="inline">Less</code> for max-heap. For custom items, store structs (e.g. <code class="inline">type Item struct{ Val, Pri int }</code>).</blockquote>
+
+    <h2>K-th largest (min-heap of size k)</h2>
+<pre data-lang="go">func kthLargest(a []int, k int) int {
+    h := &amp;IntHeap{}
+    for _, v := range a {
+        heap.Push(h, v)
+        if h.Len() &gt; k { heap.Pop(h) }
+    }
+    return (*h)[0]
+}
+</pre>
+
+    <h2>Top-K Frequent (bucket sort = O(n))</h2>
+<pre data-lang="go">func topKFrequent(a []int, k int) []int {
+    freq := map[int]int{}
+    for _, v := range a { freq[v]++ }
+    buckets := make([][]int, len(a)+1)
+    for v, f := range freq { buckets[f] = append(buckets[f], v) }
+    res := make([]int, 0, k)
+    for i := len(buckets) - 1; i &gt;= 0 &amp;&amp; len(res) &lt; k; i-- {
+        res = append(res, buckets[i]...)
+    }
+    return res[:k]
+}
+</pre>
+
+    <h2>Merge K sorted lists (heap)</h2>
+<pre data-lang="go">type Node struct{ Val int; Next *Node }
+type NodeHeap []*Node
+func (h NodeHeap) Len() int            { return len(h) }
+func (h NodeHeap) Less(i, j int) bool  { return h[i].Val &lt; h[j].Val }
+func (h NodeHeap) Swap(i, j int)       { h[i], h[j] = h[j], h[i] }
+func (h *NodeHeap) Push(x any)         { *h = append(*h, x.(*Node)) }
+func (h *NodeHeap) Pop() any           { old := *h; n := len(old); x := old[n-1]; *h = old[:n-1]; return x }
+
+func mergeK(lists []*Node) *Node {
+    h := &amp;NodeHeap{}
+    for _, l := range lists { if l != nil { heap.Push(h, l) } }
+    dummy := &amp;Node{}; tail := dummy
+    for h.Len() &gt; 0 {
+        n := heap.Pop(h).(*Node)
+        tail.Next = n; tail = n
+        if n.Next != nil { heap.Push(h, n.Next) }
+    }
+    return dummy.Next
+}
+</pre>
+
+    <h2>Find Median from Data Stream (two heaps)</h2>
+<pre data-lang="go">// max-heap (lower half) + min-heap (upper half). Sizes differ by at most 1.
+type MedianFinder struct{ lo MaxHeap; hi MinHeap }
+func (mf *MedianFinder) Add(x int) {
+    if mf.lo.Len() == 0 || x &lt;= mf.lo.Peek() { heap.Push(&amp;mf.lo, x) } else { heap.Push(&amp;mf.hi, x) }
+    // rebalance
+    if mf.lo.Len() &gt; mf.hi.Len()+1 { heap.Push(&amp;mf.hi, heap.Pop(&amp;mf.lo)) }
+    if mf.hi.Len() &gt; mf.lo.Len()   { heap.Push(&amp;mf.lo, heap.Pop(&amp;mf.hi)) }
+}
+func (mf *MedianFinder) Median() float64 {
+    if mf.lo.Len() &gt; mf.hi.Len() { return float64(mf.lo.Peek()) }
+    return (float64(mf.lo.Peek()) + float64(mf.hi.Peek())) / 2
+}
+</pre>
+
+    <h2>Dijkstra (heap)</h2>
+<pre data-lang="go">type Edge struct{ To, W int }
+type PQItem struct{ Node, Dist int }
+type PQ []PQItem
+// implement heap.Interface with Less by Dist
+
+func dijkstra(n int, src int, g [][]Edge) []int {
+    const INF = int(1e18)
+    dist := make([]int, n); for i := range dist { dist[i] = INF }
+    dist[src] = 0
+    h := &amp;PQ{{src, 0}}
+    for h.Len() &gt; 0 {
+        it := heap.Pop(h).(PQItem)
+        if it.Dist &gt; dist[it.Node] { continue }   // stale entry
+        for _, e := range g[it.Node] {
+            if nd := it.Dist + e.W; nd &lt; dist[e.To] {
+                dist[e.To] = nd
+                heap.Push(h, PQItem{e.To, nd})
+            }
+        }
+    }
+    return dist
+}
+</pre>
+
+    <h2 data-cram="essential">Classic problems</h2>
+    <table>
+      <thead><tr><th>Problem</th><th>Pattern</th><th>Time</th></tr></thead>
+      <tbody>
+        <tr><td>K-th Largest in Array / Stream</td><td>Min-heap of size k / quickselect</td><td>O(n log k)</td></tr>
+        <tr><td>Top K Frequent Elements / Words</td><td>Bucket sort or min-heap</td><td>O(n) / O(n log k)</td></tr>
+        <tr><td>K Closest Points to Origin</td><td>Max-heap of size K</td><td>O(n log k)</td></tr>
+        <tr><td>Merge K Sorted Lists / Arrays</td><td>Heap of heads</td><td>O(N log k)</td></tr>
+        <tr><td>Smallest Range Covering K Lists</td><td>Heap + max tracker</td><td>O(N log k)</td></tr>
+        <tr><td>Reorganize String</td><td>Max-heap of counts; alternate top-2</td><td>O(n log Σ)</td></tr>
+        <tr><td>Task Scheduler</td><td>Max-heap + cooldown queue</td><td>O(N log Σ)</td></tr>
+        <tr><td>Find Median from Data Stream</td><td>Two heaps</td><td>O(log n) / O(1)</td></tr>
+        <tr><td>Sliding Window Median</td><td>Two heaps + lazy deletion</td><td>O(n log k)</td></tr>
+        <tr><td>Network Delay Time / Path Min Effort</td><td>Dijkstra (heap)</td><td>O((V+E) log V)</td></tr>
+        <tr><td>Cheapest Flights K Stops</td><td>Heap (cost, node, stops)</td><td>varies</td></tr>
+        <tr><td>Rearrange Barcodes / Distant Barcodes</td><td>Max-heap by count</td><td>O(n log Σ)</td></tr>
+        <tr><td>Single Threaded CPU</td><td>Sort by start + min-heap by duration</td><td>O(n log n)</td></tr>
+        <tr><td>Furthest Building You Can Reach</td><td>Min-heap of biggest jumps used as ladders</td><td>O(n log n)</td></tr>
+        <tr><td>K-th Smallest Element in a Sorted Matrix</td><td>Heap or binary search</td><td>O(k log k)</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Anti-patterns — what NOT to say</h2>
+    <ul>
+      <li>"Sort the array, return <code class="inline">a[k-1]</code>." Works, but O(n log n) when O(n log k) or O(n) avg is on the table.</li>
+      <li>"Push everything into the heap." Heap of size K beats heap of size N when K ≪ N.</li>
+      <li>Forgetting to discard stale entries in lazy-deletion patterns (Dijkstra, sliding median).</li>
+      <li>Using <code class="inline">container/list</code> or hand-rolled heap when <code class="inline">container/heap</code> is the tool.</li>
+      <li>Using a max-heap when a min-heap was needed (or vice versa) — flip <code class="inline">Less</code>.</li>
+    </ul>
+
+    <h2 data-cram="essential">Senior interviewer follow-ups</h2>
+    <table>
+      <thead><tr><th>Probe</th><th>What they want to hear</th></tr></thead>
+      <tbody>
+        <tr><td>"Heap of K vs quickselect for K-th largest?"</td><td>Heap is O(n log k), online (handles streams). Quickselect is O(n) avg, offline, in-place.</td></tr>
+        <tr><td>"Why two heaps for stream median?"</td><td>Lower half = max-heap, upper half = min-heap; rebalance to keep sizes within 1; median is the top(s).</td></tr>
+        <tr><td>"How do you delete an arbitrary element from a heap?"</td><td>Standard heap doesn't support it. Either lazy deletion (mark + skip on pop) or use an indexed heap (map element → heap index).</td></tr>
+        <tr><td>"Dijkstra with heap on a dense graph?"</td><td>O((V+E) log V). For dense graphs (E ≈ V²), an O(V²) array-based Dijkstra can win.</td></tr>
+        <tr><td>"Merge K sorted streams of unknown size?"</td><td>Heap of one element per stream; pop and re-push next element of that stream.</td></tr>
+        <tr><td>"Reorganize string with constraint of distance ≥ d?"</td><td>Generalized Task Scheduler — max-heap + cooldown queue of size d.</td></tr>
+        <tr><td>"Why do you push <code class="inline">(dist, node)</code> with possibly stale dist in Dijkstra?"</td><td>Cheaper than a decrease-key operation; on pop, skip if dist is stale.</td></tr>
+      </tbody>
+    </table>
+
+    <h2 data-cram="essential">Self-check</h2>
+    <ul class="checklist" data-key="heaps-check">
+      <li><input type="checkbox"/><span>I can paste the Go heap.Interface boilerplate from memory.</span></li>
+      <li><input type="checkbox"/><span>I can write K-th largest with both quickselect and heap-of-K.</span></li>
+      <li><input type="checkbox"/><span>I can implement two-heap stream median.</span></li>
+      <li><input type="checkbox"/><span>I can implement Dijkstra with lazy deletion.</span></li>
+      <li><input type="checkbox"/><span>I know when bucket sort beats a heap (Top-K Frequent).</span></li>
+      <li><input type="checkbox"/><span>I can implement merge-K-sorted-lists with a heap of heads.</span></li>
+      <li><input type="checkbox"/><span>I can implement Task Scheduler with heap + cooldown queue.</span></li>
+      <li><input type="checkbox"/><span>I know how to delete arbitrary heap entries (lazy or indexed).</span></li>
+      <li><input type="checkbox"/><span>I can flip min vs max by reversing <code class="inline">Less</code> only.</span></li>
+      <li><input type="checkbox"/><span>I can solve Sliding Window Median with two heaps + lazy delete.</span></li>
+    </ul>
+
+    <div class="footer">Next → <a href="trees.html">Trees</a></div>
+  </main>
+</div>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>

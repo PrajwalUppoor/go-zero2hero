@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Math & Number Theory — Go: Zero → Hero</title>
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar-root"></aside>
+  <main class="main">
+    <div class="crumbs"><a href="../index.html">Home</a> / Patterns / Math</div>
+    <section class="page-header">
+      <div>
+        <h1>Math & Number Theory</h1>
+        <p>The classics that get smuggled into coding problems: gcd, modular exponentiation, primes, combinatorics, reservoir sampling.</p>
+      </div>
+    </section>
+
+    <h2 data-cram="essential">Mental model</h2>
+    <ul>
+      <li><b>Five recurring tools</b>:
+        <ol>
+          <li><b>Euclidean gcd</b> — also gives modular inverse via the extended version.</li>
+          <li><b>Fast exponentiation</b> — O(log e), works for integers, matrices, and modular exponents.</li>
+          <li><b>Sieve of Eratosthenes</b> — primes up to N in O(N log log N).</li>
+          <li><b>Modular arithmetic with a prime modulus</b> — for combinatorics, hashing, RSA-flavored problems.</li>
+          <li><b>Reservoir / weighted sampling</b> — when the dataset is unbounded.</li>
+        </ol>
+      </li>
+      <li><b>Watch overflow</b>: Go's <code class="inline">int</code> is 64-bit on 64-bit hosts, but multiplications can still overflow. Reduce mod after every multiply.</li>
+      <li><b>For huge numbers</b>: <code class="inline">math/big</code>. For float precision: <code class="inline">math/big.Float</code> or <code class="inline">math.FMA</code>.</li>
+      <li><b>For randomness</b>: <code class="inline">math/rand/v2</code> in 1.22+ has cleaner API. Seed once, share state.</li>
+    </ul>
+
+    <h2 data-cram="essential">gcd & lcm</h2>
+<pre data-lang="go">func gcd(a, b int) int { for b != 0 { a, b = b, a%b }; return a }
+func lcm(a, b int) int { return a / gcd(a, b) * b }
+</pre>
+
+    <h2 data-cram="essential">Modular exponentiation</h2>
+<pre data-lang="go">func powMod(a, e, m int) int {
+    r := 1 % m
+    a %= m
+    for e &gt; 0 {
+        if e &amp; 1 == 1 { r = r * a % m }
+        a = a * a % m
+        e &gt;&gt;= 1
+    }
+    return r
+}
+</pre>
+
+    <h2>Sieve of Eratosthenes</h2>
+<pre data-lang="go">func sieve(n int) []int {
+    is := make([]bool, n+1)
+    for i := 2; i*i &lt;= n; i++ {
+        if !is[i] {
+            for j := i * i; j &lt;= n; j += i { is[j] = true }
+        }
+    }
+    var primes []int
+    for i := 2; i &lt;= n; i++ { if !is[i] { primes = append(primes, i) } }
+    return primes
+}
+</pre>
+
+    <h2>Combinatorics — nCr mod p</h2>
+<pre data-lang="go">// Precompute factorials and inverse factorials mod p (prime).
+const MOD = 1_000_000_007
+var fact, inv []int
+
+func precompute(n int) {
+    fact = make([]int, n+1); inv = make([]int, n+1)
+    fact[0] = 1
+    for i := 1; i &lt;= n; i++ { fact[i] = fact[i-1] * i % MOD }
+    inv[n] = powMod(fact[n], MOD-2, MOD)
+    for i := n - 1; i &gt;= 0; i-- { inv[i] = inv[i+1] * (i + 1) % MOD }
+}
+
+func nCr(n, r int) int {
+    if r &lt; 0 || r &gt; n { return 0 }
+    return fact[n] * inv[r] % MOD * inv[n-r] % MOD
+}
+</pre>
+
+    <h2>Reservoir sampling — k items from a stream</h2>
+<pre data-lang="go">// k = 1; pick element i with probability 1/i.
+func sample(stream []int) int {
+    chosen, seen := 0, 0
+    for _, v := range stream {
+        seen++
+        if rand.Intn(seen) == 0 { chosen = v }
+    }
+    return chosen
+}
+</pre>
+
+    <h2>Random pick with weights</h2>
+<pre data-lang="go">// Build prefix sum of weights; binary search a random in [1, total].
+type Picker struct{ pre []int }
+func New(w []int) *Picker {
+    p := &amp;Picker{pre: make([]int, len(w))}
+    s := 0
+    for i, x := range w { s += x; p.pre[i] = s }
+    return p
+}
+func (p *Picker) Pick() int {
+    r := rand.Intn(p.pre[len(p.pre)-1]) + 1
+    return sort.SearchInts(p.pre, r)
+}
+</pre>
+
+    <h2>Overflow & big integers</h2>
+    <ul>
+      <li>Go's <code class="inline">int</code> is 64-bit on 64-bit OSes. Multiplications can still overflow → use <code class="inline">math/big</code> for arbitrary precision.</li>
+      <li>For modulus problems, keep intermediate values within <code class="inline">int64</code>; reduce after every multiply.</li>
+    </ul>
+
+    <h2 data-cram="essential">Classic problems</h2>
+    <table>
+      <thead><tr><th>Problem</th><th>Idea</th></tr></thead>
+      <tbody>
+        <tr><td>Pow(x, n)</td><td>Fast exponentiation; handle negative n</td></tr>
+        <tr><td>Sqrt(x)</td><td>Binary search / Newton</td></tr>
+        <tr><td>Excel Sheet Column Number / Title</td><td>Base-26 with offset</td></tr>
+        <tr><td>Happy Number</td><td>Cycle detection on digit-square sum</td></tr>
+        <tr><td>Count Primes</td><td>Sieve of Eratosthenes</td></tr>
+        <tr><td>Ugly Number II / Super Ugly Number</td><td>Min-heap or three-pointer DP</td></tr>
+        <tr><td>Factorial Trailing Zeroes</td><td>Count factors of 5 in n!</td></tr>
+        <tr><td>Random Pick with Weight</td><td>Prefix sum + binary search</td></tr>
+        <tr><td>Random Pick Index (reservoir)</td><td>Reservoir sampling for k=1</td></tr>
+        <tr><td>Insert Delete GetRandom O(1)</td><td>Map + slice swap-last</td></tr>
+        <tr><td>Roman to Integer / Integer to Roman</td><td>Greedy with subtractive notation</td></tr>
+        <tr><td>Number of Digit One</td><td>Digit DP / per-position counting</td></tr>
+        <tr><td>Add Binary / Multiply Strings</td><td>Two-pointer + carry / schoolbook</td></tr>
+        <tr><td>Fraction to Recurring Decimal</td><td>Long division + map of remainders</td></tr>
+        <tr><td>Permutation Sequence</td><td>Factorial decomposition</td></tr>
+        <tr><td>Find K-th Bit in Nth Binary String</td><td>Recursion on midpoint</td></tr>
+        <tr><td>Largest Multiple of Three</td><td>Mod 3 partition + greedy removal</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Anti-patterns — what NOT to say</h2>
+    <ul>
+      <li>Computing <code class="inline">a^e</code> with naive multiplication when <code class="inline">e &gt; 30</code> — overflow + slow.</li>
+      <li>Using <code class="inline">math.Pow</code> for integer exponents — float precision loss.</li>
+      <li>Modular inverse via brute-force when the modulus is prime — use Fermat's little theorem.</li>
+      <li>Building all primes when the trial-division of a single number suffices.</li>
+      <li>Generating random numbers without seeding (or seeding repeatedly) — both are bugs.</li>
+      <li>Using <code class="inline">rand.Intn</code> in concurrent code without synchronization (math/rand v1).</li>
+    </ul>
+
+    <h2 data-cram="essential">Senior interviewer follow-ups</h2>
+    <table>
+      <thead><tr><th>Probe</th><th>What they want to hear</th></tr></thead>
+      <tbody>
+        <tr><td>"Why does fast exponentiation work?"</td><td>Square the base when the bit is 0; multiply into the answer when the bit is 1. Each iteration halves the exponent.</td></tr>
+        <tr><td>"Modular inverse — Fermat's little vs extended Euclid?"</td><td>Fermat: <code class="inline">a^(p-2) mod p</code> if p is prime. Extended Euclid works for any coprime modulus.</td></tr>
+        <tr><td>"Reservoir sampling correctness?"</td><td>At step i, replace with probability 1/i; induction shows uniform distribution at the end.</td></tr>
+        <tr><td>"Random pick with weights — why prefix sum?"</td><td>Map a uniform random to the cumulative distribution; binary-search for the first prefix ≥ random.</td></tr>
+        <tr><td>"Why is sieve O(n log log n)?"</td><td>Sum over primes p ≤ n of n/p ≈ n log log n by Mertens' theorem.</td></tr>
+        <tr><td>"Detecting overflow in Go?"</td><td>No language-level overflow check. Use <code class="inline">math/big</code> or guard manually with <code class="inline">if a &gt; max/b</code>.</td></tr>
+      </tbody>
+    </table>
+
+    <h2 data-cram="essential">Self-check</h2>
+    <ul class="checklist" data-key="math-check">
+      <li><input type="checkbox"/><span>I can write Euclidean gcd from memory.</span></li>
+      <li><input type="checkbox"/><span>I can write fast modular exponentiation.</span></li>
+      <li><input type="checkbox"/><span>I can write the sieve of Eratosthenes.</span></li>
+      <li><input type="checkbox"/><span>I can compute nCr mod p with prime p (factorials + inverse).</span></li>
+      <li><input type="checkbox"/><span>I can implement reservoir sampling.</span></li>
+      <li><input type="checkbox"/><span>I can implement weighted random pick (prefix sum + binary search).</span></li>
+      <li><input type="checkbox"/><span>I can solve Pow(x, n) handling negative exponents.</span></li>
+      <li><input type="checkbox"/><span>I can compute factorial trailing zeros.</span></li>
+      <li><input type="checkbox"/><span>I know when to reach for <code class="inline">math/big</code>.</span></li>
+      <li><input type="checkbox"/><span>I can solve Happy Number with set or Floyd cycle detection.</span></li>
+    </ul>
+
+    <div class="footer">Next → <a href="system-design.html">System design</a></div>
+  </main>
+</div>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>

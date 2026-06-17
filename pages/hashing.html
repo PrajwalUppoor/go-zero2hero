@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hashing — Go: Zero → Hero</title>
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar-root"></aside>
+  <main class="main">
+    <div class="crumbs"><a href="../index.html">Home</a> / Patterns / Hashing</div>
+    <section class="page-header">
+      <div>
+        <h1>Hash Maps & Sets</h1>
+        <p>The most overused — and rightly so — tool in interviews. Hash to remember, hash to group, hash to deduplicate, hash to prefix-sum.</p>
+      </div>
+    </section>
+
+    <h2 data-cram="essential">Mental model</h2>
+    <ul>
+      <li><b>Hashing trades space for time</b>: O(1) average lookup, insert, delete. The cost is unordered iteration and worst-case O(n) on adversarial input.</li>
+      <li><b>Six canonical uses</b>: lookup-by-complement, prefix-state counter, canonical signature, frequency map, set-of-seen, map+DLL (LRU/LFU).</li>
+      <li><b>Composite keys</b>: in Go, structs and arrays are hashable; slices and maps are not. <code class="inline">[26]int</code> is a beautiful hashable anagram fingerprint.</li>
+      <li><b>Sets are <code class="inline">map[T]struct{}</code></b> — zero-byte values, real semantics.</li>
+      <li><b>If iteration order matters</b>, sort the keys after the fact, or use a separate slice in insertion order.</li>
+    </ul>
+
+    <h2 data-cram="essential">Go map essentials</h2>
+<pre data-lang="go">m := make(map[string]int, 64)        // size hint avoids rehashing
+v, ok := m["k"]                       // comma-ok
+delete(m, "k")
+// Set = map[T]struct{} — zero-byte value.
+set := make(map[int]struct{})
+set[42] = struct{}{}
+_, exists := set[42]
+</pre>
+
+    <h2>Two Sum (one pass)</h2>
+<pre data-lang="go">func twoSum(a []int, t int) []int {
+    seen := map[int]int{}
+    for i, v := range a {
+        if j, ok := seen[t-v]; ok { return []int{j, i} }
+        seen[v] = i
+    }
+    return nil
+}
+</pre>
+
+    <h2>Subarray Sum Equals K (prefix + map)</h2>
+<pre data-lang="go">func subarraySum(a []int, k int) int {
+    cnt := map[int]int{0: 1}          // prefix sum 0 has occurred once (empty)
+    sum, ans := 0, 0
+    for _, v := range a {
+        sum += v
+        ans += cnt[sum-k]
+        cnt[sum]++
+    }
+    return ans
+}
+</pre>
+
+    <h2>Group anagrams (composite key)</h2>
+<pre data-lang="go">func groupAnagrams(ws []string) [][]string {
+    g := map[[26]int][]string{}
+    for _, w := range ws {
+        var k [26]int
+        for i := 0; i &lt; len(w); i++ { k[w[i]-'a']++ }
+        g[k] = append(g[k], w)
+    }
+    out := make([][]string, 0, len(g))
+    for _, v := range g { out = append(out, v) }
+    return out
+}
+</pre>
+
+    <h2>Longest Consecutive Sequence — O(n)</h2>
+<pre data-lang="go">func longestConsecutive(a []int) int {
+    set := map[int]struct{}{}
+    for _, v := range a { set[v] = struct{}{} }
+    best := 0
+    for v := range set {
+        if _, ok := set[v-1]; ok { continue }   // only start at sequence heads
+        n := 1
+        for { if _, ok := set[v+n]; !ok { break }; n++ }
+        if n &gt; best { best = n }
+    }
+    return best
+}
+</pre>
+
+    <h2>Sliding-window count map</h2>
+<pre data-lang="go">// Maintain count of distinct elements as you slide; delete keys when count hits 0
+// so len(m) == #distinct.
+m := map[byte]int{}
+add := func(c byte) { m[c]++ }
+del := func(c byte) { m[c]--; if m[c] == 0 { delete(m, c) } }
+</pre>
+
+    <h2 data-cram="essential">Hash patterns gallery</h2>
+    <ul>
+      <li><b>Lookup by complement</b>: two-sum / four-sum II.</li>
+      <li><b>Prefix-state counts</b>: subarray sum/divisibility/XOR equals K.</li>
+      <li><b>Canonical signature</b>: anagrams, isomorphic strings, group shifted strings.</li>
+      <li><b>Frequency map</b> + sort/heap: top-K frequent.</li>
+      <li><b>Set of seen states</b>: cycle detection in linked list (alt to Floyd), happy number.</li>
+      <li><b>Map + DLL</b>: LRU/LFU caches.</li>
+      <li><b>Map of buckets</b>: bucket sort by frequency for O(n) top-K.</li>
+    </ul>
+
+    <h2 data-cram="essential">Pitfalls</h2>
+    <ul>
+      <li>Map iteration order is randomized — never depend on it.</li>
+      <li>You can't take an address of a map value (<code class="inline">&amp;m["k"]</code>) — assign first.</li>
+      <li>Reading from nil map is fine; writing panics.</li>
+      <li>Hash collisions on attacker-supplied keys can DoS — Go randomizes the hash seed per process.</li>
+      <li>Concurrent map writes → <code class="inline">fatal error: concurrent map writes</code> (kills the process). Use <code class="inline">sync.RWMutex</code> or <code class="inline">sync.Map</code> when shared.</li>
+      <li>Forgetting to <code class="inline">delete</code> entries with count 0 in a sliding-window distinct-count map.</li>
+    </ul>
+
+    <h2>Anti-patterns — what NOT to say</h2>
+    <ul>
+      <li>"<code class="inline">sync.Map</code> for general-purpose concurrency." Niche; <code class="inline">map + RWMutex</code> is usually faster.</li>
+      <li>Storing <code class="inline">interface{}</code> values to avoid type-aware logic — boxing kills locality.</li>
+      <li>Using a map where a small fixed array would do (e.g. <code class="inline">[26]int</code>).</li>
+      <li>Sorting keys to "guarantee order" instead of using a separate insertion-order slice.</li>
+      <li>"Hash everything in case I need it later" — premature space cost.</li>
+    </ul>
+
+    <h2 data-cram="essential">Senior interviewer follow-ups</h2>
+    <table>
+      <thead><tr><th>Probe</th><th>What they want to hear</th></tr></thead>
+      <tbody>
+        <tr><td>"Two Sum without a hash map?"</td><td>Sort + two pointers — O(n log n) but O(1) extra. Loses original indices.</td></tr>
+        <tr><td>"Why prefix-sum + map for Subarray Sum = K?"</td><td>Looking up <code class="inline">prefix - K</code> answers "is there an earlier prefix that, removed, leaves sum K?".</td></tr>
+        <tr><td>"How do you bucket-sort top-K frequent in O(n)?"</td><td>Frequency map → buckets indexed by frequency → walk from high to low.</td></tr>
+        <tr><td>"What does Go do to prevent hash-DoS?"</td><td>Random hash seed per process; for adversarial keys, bucket counts are bounded.</td></tr>
+        <tr><td>"Insert/Delete/GetRandom O(1)?"</td><td>Map of value→index in slice; delete = swap with last and pop.</td></tr>
+        <tr><td>"How do you know to use <code class="inline">[26]int</code> as a key?"</td><td>Array is hashable, fixed size, fast to compare. Strings build into it via <code class="inline">k[c-'a']++</code>.</td></tr>
+      </tbody>
+    </table>
+
+    <h2 data-cram="essential">Classic problems</h2>
+    <table>
+      <thead><tr><th>Problem</th><th>Pattern</th></tr></thead>
+      <tbody>
+        <tr><td>Two Sum / Three Sum</td><td>Lookup by complement</td></tr>
+        <tr><td>Contains Duplicate II / III</td><td>Sliding window + map / bucket</td></tr>
+        <tr><td>Group Anagrams · Isomorphic Strings · Group Shifted</td><td>Canonical signature</td></tr>
+        <tr><td>Top K Frequent Elements / Words</td><td>Bucket sort by frequency</td></tr>
+        <tr><td>Subarray Sum Equals K · Subarrays Divisible by K</td><td>Prefix sum + count map</td></tr>
+        <tr><td>Continuous Subarray Sum (multiple of K)</td><td>Prefix sum mod K + map</td></tr>
+        <tr><td>Longest Consecutive Sequence</td><td>Set + start-only enumeration</td></tr>
+        <tr><td>Valid Sudoku</td><td>3 sets per row/col/box</td></tr>
+        <tr><td>Insert Delete GetRandom O(1)</td><td>Map + slice, swap-last on delete</td></tr>
+        <tr><td>LRU / LFU Cache</td><td>Map + DLL (+ freq buckets for LFU)</td></tr>
+        <tr><td>4Sum II</td><td>Map of pair-sums vs negative pair-sums</td></tr>
+        <tr><td>Bullet point: Find Duplicate Subtrees</td><td>Hash subtree serialization</td></tr>
+        <tr><td>Logger Rate Limiter</td><td>Map of message → last-seen timestamp</td></tr>
+      </tbody>
+    </table>
+
+    <h2 data-cram="essential">Self-check</h2>
+    <ul class="checklist" data-key="hashing-check">
+      <li><input type="checkbox"/><span>I can solve Two Sum / Subarray Sum = K from memory.</span></li>
+      <li><input type="checkbox"/><span>I can implement Insert Delete GetRandom O(1) (map + slice + swap-last).</span></li>
+      <li><input type="checkbox"/><span>I can implement LRU and LFU caches.</span></li>
+      <li><input type="checkbox"/><span>I know when to use a fixed array vs a hash map for fingerprints.</span></li>
+      <li><input type="checkbox"/><span>I can do bucket-sort top-K frequent in O(n).</span></li>
+      <li><input type="checkbox"/><span>I solve Longest Consecutive Sequence in O(n).</span></li>
+      <li><input type="checkbox"/><span>I know map gotchas: random order, nil-map writes panic, no addressability.</span></li>
+      <li><input type="checkbox"/><span>I can identify the 6 canonical hashing patterns.</span></li>
+      <li><input type="checkbox"/><span>I delete map entries that hit zero in distinct-count windows.</span></li>
+      <li><input type="checkbox"/><span>I understand the trade-off vs sorting / two-pointer approaches.</span></li>
+    </ul>
+
+    <div class="footer">Next → <a href="heaps.html">Heaps</a></div>
+  </main>
+</div>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>

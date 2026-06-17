@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Go: Zero → Hero — Senior Backend Interview Track</title>
+  <meta name="description" content="An end-to-end, blindly-followable Golang interview prep guide for senior backend engineers — language, patterns, system design, flashcards and last-minute notes." />
+  <link rel="stylesheet" href="assets/css/style.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" id="sidebar-root"></aside>
+    <main class="main">
+
+      <section class="page-header">
+        <div>
+          <h1>Go: Zero → Hero</h1>
+          <p>A blindly-followable, end-to-end senior backend interview prep track. Master the language, dominate the coding patterns, and design real systems — all in one place.</p>
+          <p style="margin-top:10px;color:var(--text-faint);font-size:13px;">
+            Tip: press <kbd>⌘</kbd>/<kbd>Ctrl</kbd> + <kbd>K</kbd> (or <kbd>/</kbd>) to search · <kbd>c</kbd> for 3-day cram mode · <kbd>?</kbd> for all shortcuts.
+          </p>
+        </div>
+        <div class="kpi"><div class="num">8</div><div class="lbl">weeks</div></div>
+      </section>
+
+      <section class="stat-row" id="dashboard">
+        <div class="stat">
+          <div class="n" id="stat-pages">34</div>
+          <div class="l">Topics</div>
+        </div>
+        <div class="stat">
+          <div class="n" id="stat-tasks">—</div>
+          <div class="l">Checklist items</div>
+        </div>
+        <div class="stat">
+          <div class="n"><span id="stat-done">0</span>%</div>
+          <div class="l">Completed</div>
+          <div class="bar"><i id="stat-bar" style="width:0%"></i></div>
+        </div>
+        <div class="stat">
+          <div class="n">50+</div>
+          <div class="l">Flashcards</div>
+        </div>
+      </section>
+
+      <section class="grid cols-3">
+        <a class="card hero" href="pages/leetcode-tricks.html">
+          <h3>★★ LeetCode Trick Book</h3>
+          <p>Every pattern-recognition signal, code micro-trick and template — the single page that turns 45-min struggles into 10-min solves.</p>
+          <span class="tag">Read this first</span>
+        </a>
+        <a class="card" href="pages/cheatsheet.html">
+          <h3>🔥 Last-minute cheatsheet</h3>
+          <p>Complexities, templates, and system-design numbers on one page.</p>
+          <span class="tag">Night before</span>
+        </a>
+        <a class="card" href="pages/flashcards.html">
+          <h3>★ Flashcards</h3>
+          <p>50+ Q&A across Go, patterns and system design. Progress saved locally.</p>
+          <span class="tag">5 min/day</span>
+        </a>
+      </section>
+
+      <section class="grid cols-2" style="margin-top:16px;">
+        <div class="card hero" id="cram-cta" style="cursor:pointer;">
+          <h3>📅 3-Day Cram Mode</h3>
+          <p>Only 3 days to interview? Toggle this on and every page collapses to the must-know essentials — mental model, top template, top problems, pitfalls, self-check. Toggle again any time to see the full guide.</p>
+          <p style="margin-top:8px;color:var(--text-dim);font-size:13px;">Click here, use the sidebar button, or press <kbd>c</kbd>.</p>
+          <span class="tag" id="cram-cta-tag">Start cram mode</span>
+        </div>
+        <div class="card">
+          <h3>🗓️ The 8-week roadmap (full)</h3>
+          <p>Have more time? The full track below is paced for 8 weeks: 2 weeks of Go, 4 weeks of patterns, 2 weeks of system design — with daily and weekend rhythms.</p>
+          <p style="margin-top:8px;color:var(--text-dim);font-size:13px;">Just keep scrolling.</p>
+          <span class="tag">Recommended path</span>
+        </div>
+      </section>
+
+      <h2>Tracks</h2>
+      <section class="grid cols-3">
+        <a class="card" href="pages/go-basics.html">
+          <h3>🚀 Master the language</h3>
+          <p>From <code class="inline">go.mod</code> to channels, escape analysis and the GMP scheduler.</p>
+          <span class="tag">Phase 1 · 2 weeks</span>
+        </a>
+        <a class="card" href="pages/dynamic-programming.html">
+          <h3>🧠 Crush coding patterns</h3>
+          <p>15+ patterns with idiomatic Go solutions and ~120 must-know problems.</p>
+          <span class="tag">Phase 2 · 4 weeks</span>
+        </a>
+        <a class="card" href="pages/system-design.html">
+          <h3>🏗️ System design like a senior</h3>
+          <p>Building blocks → patterns → 6 case studies (URL shortener to Twitter).</p>
+          <span class="tag">Phase 3 · 2 weeks</span>
+        </a>
+      </section>
+
+      <h2>The 8-week roadmap</h2>
+      <p style="color:var(--text-dim)">If you only have 1–2 weeks, jump straight to the <a href="pages/cheatsheet.html">last-minute cheatsheet</a> and the <a href="pages/flashcards.html">flashcards</a>.</p>
+
+      <div class="grid cols-2">
+        <div class="card">
+          <h3>Phase 1 — Go Language (Weeks 1–2)</h3>
+          <ul class="checklist" data-key="phase1">
+            <li><input type="checkbox" /><span><a href="pages/go-basics.html">Fundamentals</a>: types, slices, maps, structs, methods, interfaces, errors</span></li>
+            <li><input type="checkbox" /><span><a href="pages/go-advanced.html">Advanced</a>: generics, reflection, escape analysis, GC, profiling</span></li>
+            <li><input type="checkbox" /><span><a href="pages/concurrency.html">Concurrency</a>: goroutines, channels, sync, context, errgroup, patterns</span></li>
+            <li><input type="checkbox" /><span><a href="pages/go-stdlib.html">Stdlib & idioms</a>: net/http, encoding/json, testing, table tests</span></li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <h3>Phase 2 — Coding Patterns (Weeks 3–6)</h3>
+          <ul class="checklist" data-key="phase2">
+            <li><input type="checkbox" /><span><a href="pages/arrays.html">Arrays</a>, <a href="pages/strings.html">strings</a>, <a href="pages/two-pointers.html">two pointers</a>, <a href="pages/sliding-window.html">sliding window</a></span></li>
+            <li><input type="checkbox" /><span><a href="pages/binary-search.html">Binary search</a>, <a href="pages/sorting.html">sorting</a>, <a href="pages/intervals.html">intervals</a>, <a href="pages/math.html">math</a>, <a href="pages/bit-manipulation.html">bits</a></span></li>
+            <li><input type="checkbox" /><span><a href="pages/linked-lists.html">Linked lists</a>, <a href="pages/stacks-queues.html">stacks & queues</a>, <a href="pages/hashing.html">hashing</a>, <a href="pages/heaps.html">heaps</a></span></li>
+            <li><input type="checkbox" /><span><a href="pages/trees.html">Trees</a>, <a href="pages/tries.html">tries</a>, <a href="pages/graphs.html">graphs</a></span></li>
+            <li><input type="checkbox" /><span><a href="pages/backtracking.html">Backtracking</a>, <a href="pages/greedy.html">greedy</a>, <a href="pages/dynamic-programming.html">DP</a> (1D/2D, knapsack, LIS, intervals, bitmask)</span></li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <h3>Phase 3 — System Design (Weeks 7–8)</h3>
+          <ul class="checklist" data-key="phase3">
+            <li><input type="checkbox" /><span><a href="pages/system-design.html">Fundamentals</a>: latency, throughput, CAP, PACELC, consistency</span></li>
+            <li><input type="checkbox" /><span><a href="pages/system-design-building-blocks.html">Building blocks</a>: LB, gateway, CDN, cache, queue, search</span></li>
+            <li><input type="checkbox" /><span><a href="pages/databases.html">Databases</a> · <a href="pages/caching.html">caching</a> · <a href="pages/messaging.html">messaging</a> · <a href="pages/microservices.html">microservices</a></span></li>
+            <li><input type="checkbox" /><span><a href="pages/system-design-cases.html">Case studies</a>: URL shortener, news feed, chat, rate limiter, search, distributed cache</span></li>
+          </ul>
+        </div>
+
+        <div class="card hero">
+          <h3>Daily routine (the “blind” schedule)</h3>
+          <ul>
+            <li><b>Morning (45m)</b> — read one pattern page; type the templates by hand.</li>
+            <li><b>Midday (60–90m)</b> — solve 2–3 problems on that pattern.</li>
+            <li><b>Evening (20m)</b> — review <a href="pages/flashcards.html">flashcards</a> + 1 system-design building block.</li>
+            <li><b>Weekend</b> — one mock system design + one mock coding round (45m + 45m).</li>
+          </ul>
+        </div>
+      </div>
+
+      <h2>What's inside</h2>
+      <div class="grid cols-3">
+        <div class="card"><h3>📘 Deep guides</h3><p>Each page: theory → idiomatic Go template → 5–10 must-do problems → senior pitfalls.</p></div>
+        <div class="card"><h3>🃏 Flashcards</h3><p>50+ Q&A across language, concurrency, patterns and system design. Spaced-style with progress saved locally.</p></div>
+        <div class="card"><h3>📝 Cheatsheet</h3><p>Last-minute single-page summary — complexities, templates, system-design numbers.</p></div>
+        <div class="card"><h3>⚙️ Idiomatic Go</h3><p>All solutions are written the way Go reviewers expect — no half-baked Java/Python translations.</p></div>
+        <div class="card"><h3>🏗️ Real designs</h3><p>End-to-end designs with capacity math, schemas, sequence diagrams (in ASCII), trade-offs and failure modes.</p></div>
+        <div class="card"><h3>🎯 Senior bar</h3><p>Pitfalls, follow-ups, scalability gotchas, observability, and operational concerns interviewers actually probe.</p></div>
+      </div>
+
+      <h2>Start now</h2>
+      <div class="grid cols-3">
+        <a class="card" href="pages/go-basics.html"><h3>1. Go fundamentals →</h3><p>Begin from zero, even if you've shipped Go in production.</p></a>
+        <a class="card" href="pages/cheatsheet.html"><h3>2. Cheatsheet 🔥</h3><p>Cram-mode the night before.</p></a>
+        <a class="card" href="pages/flashcards.html"><h3>3. Flashcards ★</h3><p>5 minutes a day keeps the rust away.</p></a>
+      </div>
+
+      <div class="footer">
+        Built as a static site — no build step, just open <code class="inline">index.html</code>.
+        Progress (checklists, flashcards, theme, cram-mode) is stored in your browser's <code class="inline">localStorage</code>.
+        Keyboard nav: <kbd>⌘K</kbd> search · <kbd>?</kbd> shortcuts · <kbd>t</kbd> theme · <kbd>c</kbd> cram.
+      </div>
+    </main>
+  </div>
+
+  <script src="assets/js/site.js"></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      const { done, total } = (window.GoZH?.getCompletion?.() || { done: 0, total: 0 });
+      const pct = total ? Math.round((done / total) * 100) : 0;
+      const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+      set("stat-tasks", total || "—");
+      set("stat-done", pct);
+      const bar = document.getElementById("stat-bar");
+      if (bar) bar.style.width = pct + "%";
+
+      // 3-day cram CTA
+      const cta = document.getElementById("cram-cta");
+      const ctaTag = document.getElementById("cram-cta-tag");
+      const refreshCta = () => {
+        if (!ctaTag) return;
+        ctaTag.textContent = window.GoZH?.getCramMode?.() ? "Cram mode is ON — click to turn off" : "Start cram mode";
+      };
+      refreshCta();
+      cta?.addEventListener("click", () => {
+        window.GoZH?.toggleCramMode?.();
+        refreshCta();
+      });
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stdlib & idioms — Go: Zero → Hero</title>
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar-root"></aside>
+  <main class="main">
+    <div class="crumbs"><a href="../index.html">Home</a> / Go Language / Stdlib & idioms</div>
+    <section class="page-header">
+      <div>
+        <h1>Stdlib & idiomatic Go</h1>
+        <p>The packages every senior backend engineer must reach for instinctively: <code class="inline">net/http</code>, <code class="inline">encoding/json</code>, <code class="inline">database/sql</code>, <code class="inline">testing</code>, <code class="inline">log/slog</code>.</p>
+      </div>
+    </section>
+
+    <h2 data-cram="essential">Mental model</h2>
+    <ul>
+      <li><b>The stdlib <i>is</i> the framework.</b> A senior Go service typically pulls in &lt; 10 third-party packages: a logger, a database driver, observability, maybe an HTTP router with patterns 1.22 doesn't yet cover.</li>
+      <li><b>Always pass <code class="inline">context.Context</code></b> as the first argument and honor it in every blocking call (<code class="inline">QueryContext</code>, <code class="inline">NewRequestWithContext</code>, <code class="inline">l.Wait(ctx)</code>).</li>
+      <li><b>Always set timeouts</b> on <code class="inline">http.Server</code>, <code class="inline">http.Client</code>, <code class="inline">database/sql</code>. Defaults are infinite — production-hostile.</li>
+      <li><b>Reuse pooled clients</b> (<code class="inline">http.Client</code>, <code class="inline">*sql.DB</code>). They are themselves the pool; one per dependency, package-level or struct field.</li>
+      <li><b>Structured logging</b> (<code class="inline">log/slog</code> in 1.21+) is non-negotiable. Strings are for humans; JSON is for machines.</li>
+    </ul>
+
+    <h2 data-cram="essential">net/http server you can read in your sleep</h2>
+<pre data-lang="go">type Server struct {
+    repo Repo
+    log  *slog.Logger
+}
+
+func (s *Server) routes() http.Handler {
+    mux := http.NewServeMux()
+    mux.HandleFunc("GET /users/{id}", s.getUser)
+    mux.HandleFunc("POST /users",     s.createUser)
+    return s.withRecover(s.withLogging(mux))
+}
+
+func (s *Server) getUser(w http.ResponseWriter, r *http.Request) {
+    id := r.PathValue("id")
+    u, err := s.repo.Get(r.Context(), id)
+    if errors.Is(err, ErrNotFound) { http.Error(w, "not found", 404); return }
+    if err != nil                  { http.Error(w, "boom", 500); return }
+    w.Header().Set("Content-Type", "application/json")
+    _ = json.NewEncoder(w).Encode(u)
+}
+
+func main() {
+    srv := &amp;http.Server{
+        Addr:              ":8080",
+        Handler:           (&amp;Server{}).routes(),
+        ReadHeaderTimeout: 5 * time.Second,
+        ReadTimeout:       10 * time.Second,
+        WriteTimeout:      10 * time.Second,
+        IdleTimeout:       60 * time.Second,
+    }
+    log.Fatal(srv.ListenAndServe())
+}
+</pre>
+    <blockquote class="warn">Always set timeouts on <code class="inline">http.Server</code>. Defaults are unlimited and a slowloris will eat all your goroutines.</blockquote>
+
+    <h2>Graceful shutdown</h2>
+<pre data-lang="go">ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+defer stop()
+
+go func() { _ = srv.ListenAndServe() }()
+&lt;-ctx.Done()
+
+shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+defer cancel()
+_ = srv.Shutdown(shutdownCtx)
+</pre>
+
+    <h2>Middleware composition</h2>
+<pre data-lang="go">func (s *Server) withLogging(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        start := time.Now()
+        next.ServeHTTP(w, r)
+        s.log.Info("req", "path", r.URL.Path, "ms", time.Since(start).Milliseconds())
+    })
+}
+
+func (s *Server) withRecover(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        defer func() {
+            if rec := recover(); rec != nil {
+                s.log.Error("panic", "err", rec, "stack", string(debug.Stack()))
+                http.Error(w, "internal", 500)
+            }
+        }()
+        next.ServeHTTP(w, r)
+    })
+}
+</pre>
+
+    <h2>HTTP client done right</h2>
+<pre data-lang="go">var httpClient = &amp;http.Client{
+    Timeout: 5 * time.Second,
+    Transport: &amp;http.Transport{
+        MaxIdleConns:        100,
+        MaxIdleConnsPerHost: 10,
+        IdleConnTimeout:     90 * time.Second,
+    },
+}
+</pre>
+    <ul>
+      <li>Reuse a single client: each <code class="inline">http.Client</code> has its own pool.</li>
+      <li>Always read & close the response body to return the connection to the pool.</li>
+    </ul>
+
+    <h2 data-cram="essential">encoding/json</h2>
+<pre data-lang="go">type User struct {
+    ID    uint64 `json:"id"`
+    Name  string `json:"name"`
+    Email string `json:"email,omitempty"`
+    pwd   string `json:"-"`           // unexported, never serialized
+}
+
+// Stream large payloads
+dec := json.NewDecoder(r.Body)
+dec.DisallowUnknownFields()
+var u User
+if err := dec.Decode(&amp;u); err != nil { ... }
+</pre>
+    <blockquote>For very large payloads or hot paths, consider <code class="inline">jsoniter</code>, <code class="inline">go-json</code>, or codegen (<code class="inline">easyjson</code>, <code class="inline">ffjson</code>). Profile first.</blockquote>
+
+    <h2 data-cram="essential">database/sql</h2>
+<pre data-lang="go">db, err := sql.Open("postgres", dsn)
+if err != nil { return err }
+db.SetMaxOpenConns(25)
+db.SetMaxIdleConns(25)
+db.SetConnMaxLifetime(5 * time.Minute)
+
+ctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+defer cancel()
+
+row := db.QueryRowContext(ctx, "SELECT name FROM users WHERE id=$1", id)
+var name string
+if err := row.Scan(&amp;name); err != nil {
+    if errors.Is(err, sql.ErrNoRows) { return "", ErrNotFound }
+    return "", err
+}
+</pre>
+    <ul>
+      <li>Always use the <code class="inline">Context</code> variants — they cancel queries on client disconnect.</li>
+      <li>Never <code class="inline">fmt.Sprintf</code> values into SQL. Always parameterize.</li>
+      <li>Use <code class="inline">sqlx</code>, <code class="inline">pgx</code>, <code class="inline">sqlc</code> for ergonomics; <code class="inline">database/sql</code> alone is fine for simple cases.</li>
+    </ul>
+
+    <h2>Logging — structured with log/slog</h2>
+<pre data-lang="go">log := slog.New(slog.NewJSONHandler(os.Stdout, &amp;slog.HandlerOptions{
+    Level: slog.LevelInfo,
+}))
+log = log.With("service", "billing", "version", buildInfo.Version)
+log.Info("user_created", "user_id", id, "duration_ms", ms)
+</pre>
+
+    <h2 data-cram="essential">testing — the patterns reviewers expect</h2>
+<pre data-lang="go">func TestParse(t *testing.T) {
+    cases := []struct{
+        name string
+        in   string
+        want int
+        err  bool
+    }{
+        {"empty", "",  0, true},
+        {"one",   "1", 1, false},
+        {"big",   "9999999999", 0, true},
+    }
+    for _, tc := range cases {
+        tc := tc
+        t.Run(tc.name, func(t *testing.T) {
+            t.Parallel()
+            got, err := parse(tc.in)
+            if (err != nil) != tc.err { t.Fatalf("err=%v wantErr=%v", err, tc.err) }
+            if got != tc.want { t.Errorf("got %d want %d", got, tc.want) }
+        })
+    }
+}
+</pre>
+    <ul>
+      <li>Table-driven tests with subtests; <code class="inline">t.Parallel()</code> where independent.</li>
+      <li><code class="inline">testing.T.Helper()</code> on assertion helpers for clean failure lines.</li>
+      <li><code class="inline">t.TempDir()</code>, <code class="inline">t.Setenv()</code> for hermetic tests.</li>
+      <li>Fuzz: <code class="inline">func FuzzParse(f *testing.F)</code> for parsers.</li>
+    </ul>
+
+    <h2>Useful "extra" packages worth knowing</h2>
+    <table>
+      <thead><tr><th>Package</th><th>Why you'll mention it</th></tr></thead>
+      <tbody>
+        <tr><td>golang.org/x/sync/errgroup</td><td>Bounded fan-out with first-error cancel</td></tr>
+        <tr><td>golang.org/x/sync/singleflight</td><td>Coalesce duplicate concurrent calls</td></tr>
+        <tr><td>golang.org/x/time/rate</td><td>Token-bucket rate limiter</td></tr>
+        <tr><td>golang.org/x/exp/slices, maps</td><td>Generic helpers, sorting, binary search</td></tr>
+        <tr><td>github.com/google/uuid</td><td>UUID v4/v7</td></tr>
+        <tr><td>github.com/jackc/pgx/v5</td><td>Best-in-class Postgres driver</td></tr>
+        <tr><td>go.uber.org/zap, log/slog</td><td>Structured logging</td></tr>
+        <tr><td>go.opentelemetry.io/otel</td><td>Tracing & metrics</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Anti-patterns — what NOT to say</h2>
+    <ul>
+      <li>"I'll use the default <code class="inline">http.Client</code>." Default has no timeout — one slow upstream and your service hangs forever.</li>
+      <li>Building SQL with <code class="inline">fmt.Sprintf</code>. Always parameterize.</li>
+      <li>Logging with <code class="inline">fmt.Println</code> or <code class="inline">log.Printf</code> in services. Use <code class="inline">slog</code> (or zap) so you can grep/filter in production.</li>
+      <li>"<code class="inline">defer rows.Close()</code> at the start, then forget the <code class="inline">if err := rows.Err()</code>." Always check terminal error after the loop.</li>
+      <li>Reading the response body and forgetting to close it — connection never returns to pool, eventually exhausts.</li>
+      <li>Catching <code class="inline">recover()</code> and ignoring it. At minimum log + stack-trace, return 500.</li>
+      <li>Encoding/decoding huge payloads with <code class="inline">json.Marshal</code> instead of streaming via <code class="inline">Encoder</code>/<code class="inline">Decoder</code>.</li>
+    </ul>
+
+    <h2 data-cram="essential">Senior interviewer follow-ups</h2>
+    <table>
+      <thead><tr><th>Probe</th><th>What they want to hear</th></tr></thead>
+      <tbody>
+        <tr><td>"How do you tune <code class="inline">database/sql</code>?"</td><td>Set <code class="inline">MaxOpenConns</code> ≤ DB-side limit/instances; <code class="inline">MaxIdleConns</code> ≈ <code class="inline">MaxOpenConns</code>; <code class="inline">ConnMaxLifetime</code> &lt; the load-balancer/server idle close.</td></tr>
+        <tr><td>"How do you propagate cancellation through HTTP middleware?"</td><td>Always use <code class="inline">r.Context()</code> derived contexts; pass the same ctx to downstream <code class="inline">http.NewRequestWithContext</code> and <code class="inline">db.QueryContext</code>.</td></tr>
+        <tr><td>"Difference between <code class="inline">http.HandleFunc</code> and a custom mux?"</td><td>Default mux is global state — bad for tests. Always use a fresh <code class="inline">http.NewServeMux()</code> in <code class="inline">routes()</code>.</td></tr>
+        <tr><td>"How do you stream a large JSON list?"</td><td><code class="inline">json.NewEncoder(w).Encode</code> per item, framed in a JSON-lines body, or chunked array with manual delimiters.</td></tr>
+        <tr><td>"What does <code class="inline">DisallowUnknownFields()</code> protect against?"</td><td>Silently ignored typos in client payloads — useful for strict contracts.</td></tr>
+        <tr><td>"How do you test an HTTP handler?"</td><td><code class="inline">httptest.NewServer</code> + real <code class="inline">http.Client</code>, or <code class="inline">httptest.NewRecorder</code> + direct <code class="inline">ServeHTTP</code>. Subtest per case, <code class="inline">t.Parallel()</code>.</td></tr>
+        <tr><td>"What does <code class="inline">http.Server.Shutdown</code> do?"</td><td>Stops accepting new connections, waits for in-flight handlers to finish (or ctx deadline). It does <i>not</i> kill long-lived hijacked conns — close those yourself.</td></tr>
+      </tbody>
+    </table>
+
+    <h2 data-cram="essential">Self-check</h2>
+    <ul class="checklist" data-key="go-stdlib-check">
+      <li><input type="checkbox"/><span>I can write an HTTP server with timeouts, mux, middleware, and graceful shutdown from memory.</span></li>
+      <li><input type="checkbox"/><span>I always use the Context variants of <code class="inline">database/sql</code>, <code class="inline">http.NewRequest</code>, and <code class="inline">errgroup</code>.</span></li>
+      <li><input type="checkbox"/><span>I know how to tune <code class="inline">db.SetMaxOpenConns</code>, <code class="inline">SetMaxIdleConns</code>, <code class="inline">SetConnMaxLifetime</code>.</span></li>
+      <li><input type="checkbox"/><span>I write table-driven subtests with <code class="inline">t.Parallel()</code> and <code class="inline">t.Helper()</code>.</span></li>
+      <li><input type="checkbox"/><span>I can stream JSON in/out using <code class="inline">Decoder</code>/<code class="inline">Encoder</code>.</span></li>
+      <li><input type="checkbox"/><span>I emit structured logs with <code class="inline">slog</code> and a request-scoped logger via context.</span></li>
+      <li><input type="checkbox"/><span>I close response bodies and check <code class="inline">rows.Err()</code> after every loop.</span></li>
+      <li><input type="checkbox"/><span>I never <code class="inline">fmt.Sprintf</code> values into SQL.</span></li>
+      <li><input type="checkbox"/><span>I have a <code class="inline">withRecover</code> middleware that logs and returns 500.</span></li>
+      <li><input type="checkbox"/><span>I know how to write a fuzz test for a parser.</span></li>
+    </ul>
+
+    <div class="footer">Up next → <a href="arrays.html">Arrays & slices patterns</a></div>
+  </main>
+</div>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>

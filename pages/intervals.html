@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Intervals — Go: Zero → Hero</title>
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar-root"></aside>
+  <main class="main">
+    <div class="crumbs"><a href="../index.html">Home</a> / Patterns / Intervals</div>
+    <section class="page-header">
+      <div>
+        <h1>Intervals</h1>
+        <p>Sort + sweep. 80% of interval problems reduce to a sort by start (or end) followed by a linear scan with a tiny state machine or a heap.</p>
+      </div>
+    </section>
+
+    <h2 data-cram="essential">Mental model</h2>
+    <ul>
+      <li><b>Five reflexes</b>:
+        <ol>
+          <li><b>Sort by start</b> → merge / insert.</li>
+          <li><b>Sort by end</b> → max non-overlapping (greedy).</li>
+          <li><b>Sweep line</b> → events <code class="inline">(time, +1/-1)</code> for max concurrency, skyline.</li>
+          <li><b>Heap of end times</b> → minimum rooms / available resources.</li>
+          <li><b>Difference array</b> → bulk range updates without per-update O(n).</li>
+        </ol>
+      </li>
+      <li><b>Define your boundaries upfront</b>: closed-closed <code class="inline">[a,b]</code>, half-open <code class="inline">[a,b)</code>, or closed-open. Touching endpoints (does <code class="inline">[1,2]</code> overlap <code class="inline">[2,3]</code>?) decide your overlap predicate.</li>
+      <li><b>For "is this point in some interval"</b> over many queries, sort intervals + binary search (or precompute via difference array).</li>
+      <li><b>For dynamic insertions/deletions</b>, reach for a TreeMap-equivalent — Go has no built-in, so use a balanced BST library, or maintain sorted slice with binary search insert.</li>
+    </ul>
+
+    <h2 data-cram="essential">Merge intervals</h2>
+<pre data-lang="go">func merge(iv [][]int) [][]int {
+    sort.Slice(iv, func(i, j int) bool { return iv[i][0] &lt; iv[j][0] })
+    var out [][]int
+    for _, x := range iv {
+        if len(out) &gt; 0 &amp;&amp; x[0] &lt;= out[len(out)-1][1] {
+            if x[1] &gt; out[len(out)-1][1] { out[len(out)-1][1] = x[1] }
+        } else {
+            out = append(out, x)
+        }
+    }
+    return out
+}
+</pre>
+
+    <h2>Insert interval</h2>
+<pre data-lang="go">func insert(iv [][]int, n []int) [][]int {
+    var out [][]int; i := 0
+    for ; i &lt; len(iv) &amp;&amp; iv[i][1] &lt; n[0]; i++ { out = append(out, iv[i]) }
+    for ; i &lt; len(iv) &amp;&amp; iv[i][0] &lt;= n[1]; i++ {
+        n[0] = min(n[0], iv[i][0]); n[1] = max(n[1], iv[i][1])
+    }
+    out = append(out, n)
+    out = append(out, iv[i:]...)
+    return out
+}
+</pre>
+
+    <h2>Meeting Rooms II — minimum rooms</h2>
+<pre data-lang="go">// Heap of end times; if next start &gt;= min end, reuse a room.
+func minMeetingRooms(iv [][]int) int {
+    sort.Slice(iv, func(i, j int) bool { return iv[i][0] &lt; iv[j][0] })
+    h := &amp;IntHeap{}
+    for _, m := range iv {
+        if h.Len() &gt; 0 &amp;&amp; (*h)[0] &lt;= m[0] { heap.Pop(h) }
+        heap.Push(h, m[1])
+    }
+    return h.Len()
+}
+
+// Alternative: sweep line — separate sorted starts and ends, walk pointers.
+</pre>
+
+    <h2 data-cram="essential">Sweep line template</h2>
+<pre data-lang="go">// Events: +1 at start, -1 at end (or end+1 for inclusive). Sort, walk, track running count.
+events := make([][2]int, 0, 2*len(iv))
+for _, x := range iv {
+    events = append(events, [2]int{x[0], +1})
+    events = append(events, [2]int{x[1], -1})
+}
+sort.Slice(events, func(i, j int) bool {
+    if events[i][0] != events[j][0] { return events[i][0] &lt; events[j][0] }
+    return events[i][1] &lt; events[j][1]            // process -1 before +1 to avoid double-counting touch
+})
+cur, best := 0, 0
+for _, e := range events {
+    cur += e[1]
+    if cur &gt; best { best = cur }
+}
+</pre>
+
+    <h2>Non-overlapping intervals (erase minimum)</h2>
+<pre data-lang="go">// Greedy: sort by END, keep last end, count removals.
+sort.Slice(iv, func(i, j int) bool { return iv[i][1] &lt; iv[j][1] })
+end, rem := math.MinInt, 0
+for _, x := range iv {
+    if x[0] &gt;= end { end = x[1] } else { rem++ }
+}
+</pre>
+
+    <h2>Difference array (range update + final query)</h2>
+<pre data-lang="go">// Add v to [l, r] in O(1); final pass produces actual values in O(n).
+diff := make([]int, n+1)
+diff[l] += v
+diff[r+1] -= v
+// Final
+cur := 0
+for i := 0; i &lt; n; i++ { cur += diff[i]; arr[i] = cur }
+</pre>
+
+    <h2 data-cram="essential">Classic problems</h2>
+    <table>
+      <thead><tr><th>Problem</th><th>Pattern</th><th>Time</th></tr></thead>
+      <tbody>
+        <tr><td>Merge Intervals</td><td>Sort + sweep</td><td>O(n log n)</td></tr>
+        <tr><td>Insert Interval</td><td>Linear scan / binary search</td><td>O(n)</td></tr>
+        <tr><td>Interval List Intersections</td><td>Two pointers across two sorted lists</td><td>O(m+n)</td></tr>
+        <tr><td>Meeting Rooms I</td><td>Sort + check overlap</td><td>O(n log n)</td></tr>
+        <tr><td>Meeting Rooms II</td><td>Heap of end times / sweep</td><td>O(n log n)</td></tr>
+        <tr><td>Car Pooling</td><td>Difference array on time</td><td>O(n)</td></tr>
+        <tr><td>Non-overlapping Intervals</td><td>Sort by end + greedy</td><td>O(n log n)</td></tr>
+        <tr><td>Min Number of Arrows</td><td>Sort by end + greedy</td><td>O(n log n)</td></tr>
+        <tr><td>Employee Free Time</td><td>Heap merge then gap scan</td><td>O(N log K)</td></tr>
+        <tr><td>My Calendar I / II / III</td><td>Sorted slice / segment tree</td><td>O(log n) per op</td></tr>
+        <tr><td>The Skyline Problem</td><td>Sweep events + max-heap</td><td>O(n log n)</td></tr>
+        <tr><td>Range Module / Disjoint Intervals</td><td>Sorted intervals + binary search</td><td>O(log n + k)</td></tr>
+        <tr><td>Number of Flowers in Full Bloom</td><td>Sweep events / binary search prefix</td><td>O((n+q) log)</td></tr>
+        <tr><td>Process Tasks Using Servers</td><td>Two heaps (free, busy)</td><td>O((n+m) log n)</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Anti-patterns — what NOT to say</h2>
+    <ul>
+      <li>"Compare every pair." O(n²) when sorting + sweep is O(n log n).</li>
+      <li>Using <code class="inline">[]Interval</code> with field comparators when a <code class="inline">[][]int</code> is faster.</li>
+      <li>Ignoring tie-breaking on sweep-line events — touching at a point gives wrong concurrency.</li>
+      <li>Modifying <code class="inline">iv</code> while iterating without resetting indices.</li>
+      <li>Using a heap when a simple <code class="inline">end</code> tracker suffices (Non-overlapping Intervals).</li>
+    </ul>
+
+    <h2 data-cram="essential">Senior interviewer follow-ups</h2>
+    <table>
+      <thead><tr><th>Probe</th><th>What they want to hear</th></tr></thead>
+      <tbody>
+        <tr><td>"How would you handle 10⁷ intervals streaming?"</td><td>Online sweep — ingest events, track running concurrency; or maintain a balanced BST of merged intervals.</td></tr>
+        <tr><td>"Meeting Rooms II without a heap?"</td><td>Sweep line: sort starts and ends separately; walk both pointers; <code class="inline">rooms = max(rooms, active)</code>.</td></tr>
+        <tr><td>"How does the sweep line ordering matter?"</td><td>For "max concurrent", process ends before starts at the same time (interval ends before another starts at exact same instant).</td></tr>
+        <tr><td>"Skyline — why max-heap with lazy deletion?"</td><td>We need the current max active height; lazily skip popped buildings whose end has passed.</td></tr>
+        <tr><td>"Difference array vs prefix sum?"</td><td>Diff array supports range updates in O(1); prefix sum supports range queries in O(1). They are inverses.</td></tr>
+      </tbody>
+    </table>
+
+    <h2 data-cram="essential">Self-check</h2>
+    <ul class="checklist" data-key="intervals-check">
+      <li><input type="checkbox"/><span>I can write Merge Intervals from memory.</span></li>
+      <li><input type="checkbox"/><span>I can write Insert Interval (skip / merge / append).</span></li>
+      <li><input type="checkbox"/><span>I can solve Meeting Rooms II with both heap and sweep line.</span></li>
+      <li><input type="checkbox"/><span>I can solve Non-overlapping Intervals with sort-by-end greedy.</span></li>
+      <li><input type="checkbox"/><span>I can do interval list intersections with two pointers.</span></li>
+      <li><input type="checkbox"/><span>I can solve Car Pooling with a difference array.</span></li>
+      <li><input type="checkbox"/><span>I can solve Skyline with events + max-heap (lazy delete).</span></li>
+      <li><input type="checkbox"/><span>I know how to break ties on sweep-line events.</span></li>
+      <li><input type="checkbox"/><span>I can implement Range Module with a sorted slice and binary search.</span></li>
+      <li><input type="checkbox"/><span>I can implement My Calendar I / II.</span></li>
+    </ul>
+
+    <div class="footer">Next → <a href="math.html">Math</a></div>
+  </main>
+</div>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>

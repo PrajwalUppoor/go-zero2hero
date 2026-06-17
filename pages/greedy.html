@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Greedy — Go: Zero → Hero</title>
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar-root"></aside>
+  <main class="main">
+    <div class="crumbs"><a href="../index.html">Home</a> / Patterns / Greedy</div>
+    <section class="page-header">
+      <div>
+        <h1>Greedy</h1>
+        <p>The hardest pattern to <em>justify</em>, the easiest to <em>code</em>. Lean on sorting + an exchange argument.</p>
+      </div>
+    </section>
+
+    <h2 data-cram="essential">Mental model</h2>
+    <ol>
+      <li>Sort by one key (start, end, ratio, value, deadline).</li>
+      <li>Scan once, maintain a running state, make the locally-optimal choice.</li>
+      <li>Prove with an exchange argument: swapping to optimal order does not decrease value.</li>
+    </ol>
+    <ul>
+      <li><b>Greedy works</b> when the problem has the <i>greedy-choice property</i> (a local optimum leads to a global one) and <i>optimal substructure</i>.</li>
+      <li><b>Five greedy schools</b>:
+        <ul>
+          <li><b>Sort by end-time</b> — interval scheduling, balloons, non-overlapping.</li>
+          <li><b>Sort by start, sweep</b> — meeting rooms, merge intervals.</li>
+          <li><b>Heap-based</b> — task scheduler, reorganize string, scheduling with deadlines.</li>
+          <li><b>Two-pointer greedy</b> — boats to save people, container with most water.</li>
+          <li><b>Custom comparator</b> — largest number, queue reconstruction.</li>
+        </ul>
+      </li>
+      <li><b>If you can't argue why greedy works in 30 seconds, switch to DP.</b> Knapsack-with-arbitrary-weights is the classic counterexample.</li>
+    </ul>
+
+    <h2 data-cram="essential">Interval scheduling — maximum non-overlap</h2>
+<pre data-lang="go">// Sort by end time; greedily pick the earliest-ending compatible interval.
+sort.Slice(iv, func(i, j int) bool { return iv[i][1] &lt; iv[j][1] })
+count, end := 0, math.MinInt
+for _, x := range iv {
+    if x[0] &gt;= end { count++; end = x[1] }
+}
+</pre>
+
+    <h2>Jump Game</h2>
+<pre data-lang="go">func canJump(a []int) bool {
+    reach := 0
+    for i, v := range a {
+        if i &gt; reach { return false }
+        if i + v &gt; reach { reach = i + v }
+    }
+    return true
+}
+
+// Jump Game II — minimum jumps to reach end.
+func jump(a []int) int {
+    jumps, end, far := 0, 0, 0
+    for i := 0; i &lt; len(a)-1; i++ {
+        if i+a[i] &gt; far { far = i + a[i] }
+        if i == end { jumps++; end = far }
+    }
+    return jumps
+}
+</pre>
+
+    <h2>Gas Station — start index</h2>
+<pre data-lang="go">func canCompleteCircuit(gas, cost []int) int {
+    total, tank, start := 0, 0, 0
+    for i := range gas {
+        d := gas[i] - cost[i]
+        total += d; tank += d
+        if tank &lt; 0 { tank = 0; start = i + 1 }
+    }
+    if total &lt; 0 { return -1 }
+    return start
+}
+</pre>
+
+    <h2>Largest Number (custom comparator)</h2>
+<pre data-lang="go">func largestNumber(nums []int) string {
+    s := make([]string, len(nums))
+    for i, n := range nums { s[i] = strconv.Itoa(n) }
+    sort.Slice(s, func(i, j int) bool { return s[i]+s[j] &gt; s[j]+s[i] })
+    if s[0] == "0" { return "0" }
+    return strings.Join(s, "")
+}
+</pre>
+
+    <h2>Task Scheduler (max-heap)</h2>
+    <ul>
+      <li>Greedy with a max-heap on remaining counts; refill cooled tasks after n ticks.</li>
+      <li>Closed form: <code class="inline">max(n_tasks, (maxFreq-1)*(n+1) + #tiesAtMax)</code>.</li>
+    </ul>
+
+    <h2 data-cram="essential">Common greedy problems</h2>
+    <table>
+      <thead><tr><th>Problem</th><th>Greedy choice</th><th>Time</th></tr></thead>
+      <tbody>
+        <tr><td>Assign Cookies</td><td>Sort both, two pointers</td><td>O(n log n)</td></tr>
+        <tr><td>Lemonade Change</td><td>Always give back largest bills first</td><td>O(n)</td></tr>
+        <tr><td>Best Time Buy/Sell II</td><td>Sum positive deltas</td><td>O(n)</td></tr>
+        <tr><td>Jump Game / Jump Game II</td><td>Maintain reach + lazy level jumps</td><td>O(n)</td></tr>
+        <tr><td>Gas Station</td><td>Reset start when tank goes negative</td><td>O(n)</td></tr>
+        <tr><td>Min Arrows to Burst Balloons</td><td>Sort by end; place arrow at end</td><td>O(n log n)</td></tr>
+        <tr><td>Non-overlapping Intervals</td><td>Sort by end; remove overlaps</td><td>O(n log n)</td></tr>
+        <tr><td>Queue Reconstruction by Height</td><td>Sort by height desc, k asc; insert at index k</td><td>O(n²)</td></tr>
+        <tr><td>Boats to Save People</td><td>Sort + two pointers (heaviest with lightest)</td><td>O(n log n)</td></tr>
+        <tr><td>Partition Labels</td><td>Track last index of each char; close when reached</td><td>O(n)</td></tr>
+        <tr><td>Reorganize String / Task Scheduler</td><td>Max-heap of counts</td><td>O(n log Σ)</td></tr>
+        <tr><td>Hand of Straights / Sets of K Consecutive</td><td>Sorted map; pull from smallest</td><td>O(n log n)</td></tr>
+        <tr><td>Largest Number</td><td>Comparator: <code class="inline">a+b vs b+a</code></td><td>O(n log n)</td></tr>
+        <tr><td>Candy</td><td>Two passes: left-to-right, right-to-left</td><td>O(n)</td></tr>
+        <tr><td>Min Cost Hire K Workers</td><td>Sort by ratio; max-heap of quality</td><td>O(n log n)</td></tr>
+        <tr><td>IPO / Maximize Capital</td><td>Min-heap by capital + max-heap by profit</td><td>O((N+K) log N)</td></tr>
+        <tr><td>Course Schedule III</td><td>Sort by deadline; max-heap of durations</td><td>O(n log n)</td></tr>
+        <tr><td>Two City Scheduling</td><td>Sort by cost difference (A − B)</td><td>O(n log n)</td></tr>
+      </tbody>
+    </table>
+
+    <h2 data-cram="essential">When greedy fails</h2>
+    <blockquote class="danger">If you can't argue an exchange / matroid / cut property, DP is safer. Counter-examples (e.g. unbounded knapsack with weird weights) burn naïve greedy.</blockquote>
+
+    <h2>Anti-patterns — what NOT to say</h2>
+    <ul>
+      <li>"Greedy probably works." Without an argument, you'll be wrong on adversarial inputs.</li>
+      <li>Sorting by the wrong key (start vs end) — interval scheduling diverges sharply on the choice.</li>
+      <li>Assuming greedy + DP are the same. Greedy commits; DP explores.</li>
+      <li>Mixing greedy choices across phases (e.g. sort one way, then change the criterion mid-loop).</li>
+    </ul>
+
+    <h2 data-cram="essential">Senior interviewer follow-ups</h2>
+    <table>
+      <thead><tr><th>Probe</th><th>What they want to hear</th></tr></thead>
+      <tbody>
+        <tr><td>"Why sort by end time, not start time, for max non-overlapping intervals?"</td><td>Earliest end leaves the most room for future intervals — exchange argument: replacing any picked interval with the earliest-ending compatible one preserves count.</td></tr>
+        <tr><td>"How do you prove a greedy correct?"</td><td>Exchange argument (swap to optimal preserves value), or matroid (greedy on matroids gives optimum), or cut property (MST).</td></tr>
+        <tr><td>"Greedy vs DP for activity selection?"</td><td>If only counting non-overlap → greedy. If maximizing weight → weighted interval scheduling = DP.</td></tr>
+        <tr><td>"Jump Game II — why is the level-by-level approach O(n)?"</td><td>Each level represents one jump; the inner expansion only scans each index once.</td></tr>
+        <tr><td>"Gas Station — why reset start instead of trying every index?"</td><td>If sum from i fails at j, no index in [i, j] can succeed (their suffixes are partial sums of i's failed run).</td></tr>
+      </tbody>
+    </table>
+
+    <h2 data-cram="essential">Self-check</h2>
+    <ul class="checklist" data-key="greedy-check">
+      <li><input type="checkbox"/><span>I can solve interval scheduling by sorting end-times.</span></li>
+      <li><input type="checkbox"/><span>I can solve Jump Game and Jump Game II in O(n).</span></li>
+      <li><input type="checkbox"/><span>I can solve Gas Station with one pass + reset.</span></li>
+      <li><input type="checkbox"/><span>I can solve Largest Number with the <code class="inline">a+b vs b+a</code> comparator.</span></li>
+      <li><input type="checkbox"/><span>I can solve Reorganize String / Task Scheduler with a max-heap.</span></li>
+      <li><input type="checkbox"/><span>I can solve Partition Labels with last-occurrence tracking.</span></li>
+      <li><input type="checkbox"/><span>I can solve Queue Reconstruction by Height.</span></li>
+      <li><input type="checkbox"/><span>I can sketch an exchange argument for any greedy I propose.</span></li>
+      <li><input type="checkbox"/><span>I know when to escalate from greedy to DP.</span></li>
+      <li><input type="checkbox"/><span>I can solve Candy with two passes.</span></li>
+    </ul>
+
+    <div class="footer">Next → <a href="dynamic-programming.html">Dynamic programming</a></div>
+  </main>
+</div>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Arrays & Slices — Go: Zero → Hero</title>
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar-root"></aside>
+  <main class="main">
+    <div class="crumbs"><a href="../index.html">Home</a> / Patterns / Arrays</div>
+    <section class="page-header">
+      <div>
+        <h1>Arrays & Slices</h1>
+        <p>The base of every other pattern. Learn the classics: prefix sums, two pointers, Kadane, Dutch flag, cyclic sort, in-place ops.</p>
+      </div>
+    </section>
+
+    <h2 data-cram="essential">Mental model</h2>
+    <ul>
+      <li><b>Slices are the workhorse.</b> Three fields under the hood — <code class="inline">{ptr, len, cap}</code> — and <code class="inline">append</code> doubles capacity when it grows.</li>
+      <li><b>Five canonical patterns cover ~80% of array problems</b>: prefix sum, two pointers, sliding window, in-place write index, and Kadane.</li>
+      <li><b>If the array is sorted</b>, lean on two pointers or binary search before anything else.</li>
+      <li><b>If the array contains values in <code class="inline">[1..n]</code></b>, cyclic sort or index-as-marker tricks usually win.</li>
+      <li><b>If the constraint is "subarray sum equals K"</b> (with negatives possible), reach for prefix-sum + hashmap of counts.</li>
+    </ul>
+
+    <h2 data-cram="essential">Core templates</h2>
+
+    <h3>1. Prefix sum</h3>
+<pre data-lang="go">// Range sum [l, r] in O(1) after O(n) build.
+func buildPrefix(a []int) []int {
+    p := make([]int, len(a)+1)
+    for i, v := range a { p[i+1] = p[i] + v }
+    return p
+}
+func rangeSum(p []int, l, r int) int { return p[r+1] - p[l] }
+</pre>
+
+    <h3>2. Kadane (max subarray)</h3>
+<pre data-lang="go">func maxSubArray(nums []int) int {
+    best, cur := nums[0], nums[0]
+    for i := 1; i &lt; len(nums); i++ {
+        if cur+nums[i] &lt; nums[i] { cur = nums[i] } else { cur += nums[i] }
+        if cur &gt; best { best = cur }
+    }
+    return best
+}
+</pre>
+
+    <h3>3. Dutch national flag (3-way partition)</h3>
+<pre data-lang="go">func sortColors(a []int) {
+    lo, mid, hi := 0, 0, len(a)-1
+    for mid &lt;= hi {
+        switch a[mid] {
+        case 0: a[lo], a[mid] = a[mid], a[lo]; lo++; mid++
+        case 1: mid++
+        case 2: a[mid], a[hi] = a[hi], a[mid]; hi--
+        }
+    }
+}
+</pre>
+
+    <h3>4. Cyclic sort (numbers in [1..n])</h3>
+<pre data-lang="go">func firstMissingPositive(a []int) int {
+    n := len(a)
+    for i := 0; i &lt; n; {
+        v := a[i]
+        if v &gt; 0 &amp;&amp; v &lt;= n &amp;&amp; a[v-1] != v {
+            a[i], a[v-1] = a[v-1], a[i]
+        } else { i++ }
+    }
+    for i, v := range a { if v != i+1 { return i + 1 } }
+    return n + 1
+}
+</pre>
+
+    <h3>5. In-place reverse / rotate</h3>
+<pre data-lang="go">func reverse(a []int, l, r int) {
+    for l &lt; r { a[l], a[r] = a[r], a[l]; l++; r-- }
+}
+// Rotate right by k:  reverse(0..n-1); reverse(0..k-1); reverse(k..n-1)
+func rotate(a []int, k int) {
+    n := len(a); k %= n
+    reverse(a, 0, n-1); reverse(a, 0, k-1); reverse(a, k, n-1)
+}
+</pre>
+
+    <h2 data-cram="essential">Must-do problems</h2>
+    <table>
+      <thead><tr><th>Problem</th><th>Idea</th><th>Time / Space</th></tr></thead>
+      <tbody>
+        <tr><td>Two Sum</td><td>Hash map of complement</td><td>O(n) / O(n)</td></tr>
+        <tr><td>Best Time to Buy/Sell Stock I/II/III</td><td>Track min/max state machine</td><td>O(n) / O(1)</td></tr>
+        <tr><td>Maximum Subarray</td><td>Kadane</td><td>O(n) / O(1)</td></tr>
+        <tr><td>Product of Array Except Self</td><td>Prefix × suffix in 2 passes</td><td>O(n) / O(1) extra</td></tr>
+        <tr><td>Subarray Sum Equals K</td><td>Prefix sum + map of counts</td><td>O(n) / O(n)</td></tr>
+        <tr><td>Continuous Subarray Sum (multiple of K)</td><td>Prefix sum mod K + map</td><td>O(n) / O(K)</td></tr>
+        <tr><td>Trapping Rain Water</td><td>Two pointers / monotonic stack</td><td>O(n) / O(1)</td></tr>
+        <tr><td>Container With Most Water</td><td>Opposite-end two pointers</td><td>O(n) / O(1)</td></tr>
+        <tr><td>Sort Colors</td><td>Dutch flag</td><td>O(n) / O(1)</td></tr>
+        <tr><td>First Missing Positive</td><td>Cyclic sort</td><td>O(n) / O(1)</td></tr>
+        <tr><td>Move Zeroes</td><td>Two pointers, write index</td><td>O(n) / O(1)</td></tr>
+        <tr><td>Rotate Array</td><td>Triple reverse</td><td>O(n) / O(1)</td></tr>
+        <tr><td>Find All Duplicates / Find Missing Numbers</td><td>Index-as-marker (negate)</td><td>O(n) / O(1)</td></tr>
+        <tr><td>Set Matrix Zeroes</td><td>Use first row/col as flags</td><td>O(mn) / O(1)</td></tr>
+        <tr><td>Spiral Matrix</td><td>Layer simulation</td><td>O(mn) / O(1)</td></tr>
+        <tr><td>Merge Sorted Array (in place)</td><td>Two pointers from the back</td><td>O(m+n) / O(1)</td></tr>
+        <tr><td>Maximum Product Subarray</td><td>Kadane variant tracking min &amp; max</td><td>O(n) / O(1)</td></tr>
+        <tr><td>Next Permutation</td><td>Find pivot, swap, reverse suffix</td><td>O(n) / O(1)</td></tr>
+        <tr><td>Majority Element</td><td>Boyer–Moore vote</td><td>O(n) / O(1)</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Anti-patterns — what NOT to say</h2>
+    <ul>
+      <li>"I'll just sort it." Sorting is O(n log n) — if a hash, two-pointer or prefix-sum solution exists at O(n), say so first.</li>
+      <li>"I'll allocate a new slice each iteration." Loop allocations destroy performance — pre-size with <code class="inline">make([]T, 0, n)</code>.</li>
+      <li>Returning a sub-slice of a large internal buffer — caller can't garbage-collect the underlying array. <code class="inline">slices.Clone</code> at the boundary.</li>
+      <li>Manual loops where <code class="inline">slices.Index</code>, <code class="inline">slices.Contains</code>, <code class="inline">slices.SortFunc</code> are clearer.</li>
+      <li>Using <code class="inline">a = append(a[:i], a[i+1:]...)</code> in a hot loop — that's O(n) per delete; use a write index in O(n) total.</li>
+    </ul>
+
+    <h2 data-cram="essential">Senior interviewer follow-ups</h2>
+    <table>
+      <thead><tr><th>Probe</th><th>What they want to hear</th></tr></thead>
+      <tbody>
+        <tr><td>"Can you do Two Sum in O(1) extra space?"</td><td>Only if input is sorted (then opposite-end two pointers).</td></tr>
+        <tr><td>"What if Maximum Subarray must return indices, not just sum?"</td><td>Track <code class="inline">curStart</code>; reset when <code class="inline">cur</code> resets; also remember <code class="inline">bestStart, bestEnd</code> when you update best.</td></tr>
+        <tr><td>"How do you do Product Except Self with O(1) extra (output not counted)?"</td><td>One pass of prefix products into output, second pass multiplies by running suffix.</td></tr>
+        <tr><td>"What if subarray sum can include negative numbers?"</td><td>Sliding window fails; use prefix-sum + hashmap of counts.</td></tr>
+        <tr><td>"Rotate by k where k may be larger than n?"</td><td><code class="inline">k %= n</code> first; <code class="inline">k</code> may also be negative — normalize with <code class="inline">((k%n)+n)%n</code>.</td></tr>
+        <tr><td>"Trapping Rain Water with O(1) space?"</td><td>Two-pointer with running <code class="inline">leftMax</code> / <code class="inline">rightMax</code>; advance the smaller side.</td></tr>
+        <tr><td>"Streaming version of Top-K elements?"</td><td>Min-heap of size K — replace top when next item is larger.</td></tr>
+      </tbody>
+    </table>
+
+    <h2 data-cram="essential">Senior pitfalls</h2>
+    <ul>
+      <li>Off-by-one on inclusive/exclusive ranges. Pick a convention (half-open <code class="inline">[l, r)</code>) and stick to it.</li>
+      <li>Mutating the caller's slice without documenting it.</li>
+      <li>Allocating in a hot loop — pre-size with <code class="inline">make([]T, 0, n)</code>.</li>
+      <li>Slice aliasing bugs when returning subslices: copy if the caller may outlive the source.</li>
+    </ul>
+
+    <h2 data-cram="essential">Practice checklist</h2>
+    <ul class="checklist" data-key="arrays-check">
+      <li><input type="checkbox"/><span>Implement prefix sum + range sum from memory.</span></li>
+      <li><input type="checkbox"/><span>Solve Subarray Sum = K with prefix-count map (negatives included).</span></li>
+      <li><input type="checkbox"/><span>Solve Trapping Rain Water two ways (stack + two-pointer).</span></li>
+      <li><input type="checkbox"/><span>Solve First Missing Positive in O(n) / O(1) extra.</span></li>
+      <li><input type="checkbox"/><span>Implement Kadane and adapt it to return indices, not just sum.</span></li>
+      <li><input type="checkbox"/><span>Sort Colors (Dutch flag) in one pass.</span></li>
+      <li><input type="checkbox"/><span>Rotate array right by k in O(n) / O(1).</span></li>
+      <li><input type="checkbox"/><span>Product Except Self without using division.</span></li>
+      <li><input type="checkbox"/><span>Find duplicates / missing using cyclic sort.</span></li>
+      <li><input type="checkbox"/><span>Boyer–Moore majority vote in one pass.</span></li>
+    </ul>
+
+    <div class="footer">Next → <a href="strings.html">Strings</a></div>
+  </main>
+</div>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>

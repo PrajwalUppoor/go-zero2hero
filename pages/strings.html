@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Strings — Go: Zero → Hero</title>
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar-root"></aside>
+  <main class="main">
+    <div class="crumbs"><a href="../index.html">Home</a> / Patterns / Strings</div>
+    <section class="page-header">
+      <div>
+        <h1>Strings</h1>
+        <p>String hashing, KMP, Z-function, palindromes, sliding windows over chars, anagrams. Go's <code class="inline">string</code> is read-only UTF-8 — know when to convert to <code class="inline">[]byte</code> or <code class="inline">[]rune</code>.</p>
+      </div>
+    </section>
+
+    <h2 data-cram="essential">Mental model</h2>
+    <ul>
+      <li><b>A Go string is a read-only slice of UTF-8 bytes.</b> Indexing returns a byte; iteration with <code class="inline">range</code> returns runes (decoded code points).</li>
+      <li><b>Three techniques cover most problems</b>: counter array (anagrams), sliding window (substring conditions), and rolling-hash / KMP (pattern matching).</li>
+      <li><b>If the alphabet is fixed and small</b> (lowercase ASCII), prefer <code class="inline">[26]int</code> arrays over maps — faster, copy-cheap, hashable.</li>
+      <li><b>For palindromes</b>, expand-around-center is the bread-and-butter. Manacher only when O(n) is required.</li>
+      <li><b>For repeated string searches in a fixed text</b>, build a suffix array or suffix automaton; for needle/haystack, KMP / Z is plenty.</li>
+    </ul>
+
+    <h2 data-cram="essential">Go string fundamentals</h2>
+    <ul>
+      <li><code class="inline">len(s)</code> = bytes. To count code points: <code class="inline">utf8.RuneCountInString(s)</code> or convert to <code class="inline">[]rune</code>.</li>
+      <li><code class="inline">for i, r := range s</code> iterates runes; <code class="inline">i</code> is the byte offset.</li>
+      <li>Mutate via <code class="inline">[]byte</code> or <code class="inline">[]rune</code>, then convert back.</li>
+      <li>Use <code class="inline">strings.Builder</code> for concatenation.</li>
+    </ul>
+
+    <h2>Anagram check (counter)</h2>
+<pre data-lang="go">func isAnagram(s, t string) bool {
+    if len(s) != len(t) { return false }
+    var c [26]int
+    for i := 0; i &lt; len(s); i++ { c[s[i]-'a']++; c[t[i]-'a']-- }
+    for _, v := range c { if v != 0 { return false } }
+    return true
+}
+</pre>
+
+    <h2>Group anagrams</h2>
+<pre data-lang="go">func groupAnagrams(ws []string) [][]string {
+    g := map[[26]int][]string{}
+    for _, w := range ws {
+        var k [26]int
+        for i := 0; i &lt; len(w); i++ { k[w[i]-'a']++ }
+        g[k] = append(g[k], w)
+    }
+    out := make([][]string, 0, len(g))
+    for _, v := range g { out = append(out, v) }
+    return out
+}
+</pre>
+
+    <h2>Longest palindromic substring (expand around center)</h2>
+<pre data-lang="go">func longestPalindrome(s string) string {
+    if s == "" { return "" }
+    bestL, bestR := 0, 0
+    expand := func(l, r int) (int, int) {
+        for l &gt;= 0 &amp;&amp; r &lt; len(s) &amp;&amp; s[l] == s[r] { l--; r++ }
+        return l + 1, r - 1
+    }
+    for i := 0; i &lt; len(s); i++ {
+        l1, r1 := expand(i, i)
+        l2, r2 := expand(i, i+1)
+        if r1-l1 &gt; bestR-bestL { bestL, bestR = l1, r1 }
+        if r2-l2 &gt; bestR-bestL { bestL, bestR = l2, r2 }
+    }
+    return s[bestL : bestR+1]
+}
+</pre>
+
+    <h2>KMP — pattern matching in O(n+m)</h2>
+<pre data-lang="go">func kmpFail(p string) []int {
+    f := make([]int, len(p))
+    k := 0
+    for i := 1; i &lt; len(p); i++ {
+        for k &gt; 0 &amp;&amp; p[k] != p[i] { k = f[k-1] }
+        if p[k] == p[i] { k++ }
+        f[i] = k
+    }
+    return f
+}
+func kmpSearch(t, p string) int {
+    if p == "" { return 0 }
+    f := kmpFail(p); k := 0
+    for i := 0; i &lt; len(t); i++ {
+        for k &gt; 0 &amp;&amp; p[k] != t[i] { k = f[k-1] }
+        if p[k] == t[i] { k++ }
+        if k == len(p) { return i - k + 1 }
+    }
+    return -1
+}
+</pre>
+
+    <h2>Rolling hash (Rabin–Karp)</h2>
+<pre data-lang="go">// Simple double hashing avoids most collisions.
+const mod1, base1 = 1_000_000_007, 131
+const mod2, base2 = 1_000_000_009, 137
+
+// Use prefix hashes h[i+1] = (h[i]*base + s[i]) % mod and powers of base
+// to extract any substring hash in O(1).
+</pre>
+
+    <h2 data-cram="essential">Must-do problems</h2>
+    <table>
+      <thead><tr><th>Problem</th><th>Pattern</th><th>Time</th></tr></thead>
+      <tbody>
+        <tr><td>Valid Anagram</td><td>Counter array</td><td>O(n)</td></tr>
+        <tr><td>Group Anagrams</td><td>[26]int key in map</td><td>O(nk)</td></tr>
+        <tr><td>Longest Substring Without Repeating Characters</td><td>Sliding window + last-seen map</td><td>O(n)</td></tr>
+        <tr><td>Longest Palindromic Substring</td><td>Expand around center / Manacher</td><td>O(n²) / O(n)</td></tr>
+        <tr><td>Palindromic Substrings (count)</td><td>Expand around center</td><td>O(n²)</td></tr>
+        <tr><td>String Compression</td><td>In-place write index</td><td>O(n) / O(1)</td></tr>
+        <tr><td>Implement strStr / Find Pattern</td><td>KMP / Z</td><td>O(n+m)</td></tr>
+        <tr><td>Repeated Substring Pattern</td><td>(s+s)[1:-1] contains s</td><td>O(n)</td></tr>
+        <tr><td>Minimum Window Substring</td><td>Two-pointer + counter</td><td>O(n)</td></tr>
+        <tr><td>Palindrome Partitioning</td><td>Backtracking + memo</td><td>O(n·2ⁿ)</td></tr>
+        <tr><td>Encode / Decode Strings</td><td>Length-prefix framing</td><td>O(n)</td></tr>
+        <tr><td>Word Pattern / Isomorphic Strings</td><td>Two-way map</td><td>O(n)</td></tr>
+        <tr><td>Multiply Strings</td><td>Schoolbook with carry</td><td>O(n·m)</td></tr>
+        <tr><td>Add Strings / Add Binary</td><td>Two-pointer + carry</td><td>O(n)</td></tr>
+        <tr><td>Longest Common Prefix</td><td>Vertical scan / divide-conquer</td><td>O(n·m)</td></tr>
+        <tr><td>Reverse Words in a String</td><td>Reverse all + reverse each word</td><td>O(n) / O(1)</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Anti-patterns — what NOT to say</h2>
+    <ul>
+      <li>"I'll convert to <code class="inline">[]rune</code> just to be safe." That's an O(n) allocation. For ASCII, work with bytes.</li>
+      <li>String concatenation in a loop with <code class="inline">+=</code>. Use <code class="inline">strings.Builder</code> with a sized <code class="inline">Grow</code> hint.</li>
+      <li>Hand-rolling regex when <code class="inline">strings.IndexByte</code> / <code class="inline">strings.Cut</code> are clearer and faster.</li>
+      <li>Using a hashmap of byte counts when a fixed array <code class="inline">[26]int</code> is faster, hashable, and copyable.</li>
+      <li>Single-mod rolling hash for adversarial inputs — collisions are exploitable. Use double hashing.</li>
+    </ul>
+
+    <h2 data-cram="essential">Senior interviewer follow-ups</h2>
+    <table>
+      <thead><tr><th>Probe</th><th>What they want to hear</th></tr></thead>
+      <tbody>
+        <tr><td>"Why is <code class="inline">len(s)</code> not the same as character count for non-ASCII?"</td><td>Strings are UTF-8 byte slices; multi-byte runes count once but occupy 2–4 bytes.</td></tr>
+        <tr><td>"How would you make Longest Palindromic Substring O(n)?"</td><td>Manacher's algorithm — keep expanding around centers using mirror symmetry.</td></tr>
+        <tr><td>"Why is the failure function in KMP suffix-prefix table?"</td><td>It tells you the longest proper prefix of <code class="inline">p[0..i]</code> that is also a suffix — when a mismatch happens, you can skip to that prefix.</td></tr>
+        <tr><td>"Two strings; same characters, different order — how do you compare in O(n)?"</td><td>Counter array (or sort with O(n log n)).</td></tr>
+        <tr><td>"How to find all duplicate substrings of length k?"</td><td>Rolling hash with double mod, storing seen hashes.</td></tr>
+        <tr><td>"Concat 1 million strings — how?"</td><td><code class="inline">strings.Builder</code> with <code class="inline">Grow(totalSize)</code> precomputed.</td></tr>
+        <tr><td>"Detect anagram across very long strings?"</td><td>Counter compare; or sort each and compare; or 26-letter hash.</td></tr>
+      </tbody>
+    </table>
+
+    <h2 data-cram="essential">Pitfalls</h2>
+    <ul>
+      <li>Indexing a string returns a byte, not a rune. For multibyte text, iterate with <code class="inline">range</code> or use <code class="inline">utf8.DecodeRuneInString</code>.</li>
+      <li><code class="inline">[]rune(s)</code> allocates O(n). For ASCII-only, work with bytes.</li>
+      <li>Using <code class="inline">strings.Index</code> in a hot loop instead of one-shot KMP / Z when scanning many patterns.</li>
+      <li>Forgetting that <code class="inline">strings.Builder</code> can't be copied — pass by pointer.</li>
+      <li>Rolling-hash collisions — always confirm with a direct compare on suspected match.</li>
+    </ul>
+
+    <h2 data-cram="essential">Self-check</h2>
+    <ul class="checklist" data-key="strings-check">
+      <li><input type="checkbox"/><span>I can iterate a string both byte-wise and rune-wise.</span></li>
+      <li><input type="checkbox"/><span>I can write a counter-based anagram check from memory.</span></li>
+      <li><input type="checkbox"/><span>I can write KMP failure function and search.</span></li>
+      <li><input type="checkbox"/><span>I can implement rolling hash with double mod.</span></li>
+      <li><input type="checkbox"/><span>I can solve Longest Palindromic Substring with expand-around-center.</span></li>
+      <li><input type="checkbox"/><span>I can solve Minimum Window Substring with sliding window + counter.</span></li>
+      <li><input type="checkbox"/><span>I know when <code class="inline">strings.Builder</code> beats <code class="inline">+=</code> and how to size it.</span></li>
+      <li><input type="checkbox"/><span>I can encode/decode a list of arbitrary strings (length-prefix).</span></li>
+      <li><input type="checkbox"/><span>I can spot when to use a [26]int vs a hashmap.</span></li>
+      <li><input type="checkbox"/><span>I can detect repeated-substring pattern with the (s+s) trick.</span></li>
+    </ul>
+
+    <div class="footer">Next → <a href="two-pointers.html">Two pointers</a></div>
+  </main>
+</div>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>

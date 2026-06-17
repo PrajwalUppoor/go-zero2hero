@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sliding Window — Go: Zero → Hero</title>
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar-root"></aside>
+  <main class="main">
+    <div class="crumbs"><a href="../index.html">Home</a> / Patterns / Sliding Window</div>
+    <section class="page-header">
+      <div>
+        <h1>Sliding Window</h1>
+        <p>Two flavors: <b>fixed-size</b> (k known) and <b>variable-size</b> (grow until invalid, then shrink). Both are O(n) when each element enters and leaves the window once.</p>
+      </div>
+    </section>
+
+    <h2 data-cram="essential">Mental model</h2>
+    <ul>
+      <li><b>The hint</b>: "longest/shortest contiguous subarray/substring satisfying X" → sliding window.</li>
+      <li><b>The invariant</b>: each element enters the window <i>once</i> and leaves <i>once</i>. That makes it amortized O(n) even with a nested while-loop inside.</li>
+      <li><b>Two flavors</b>:
+        <ul>
+          <li><b>Fixed-size k</b> — slide a fixed window, recompute aggregate by add-new / drop-old.</li>
+          <li><b>Variable-size</b> — grow until invalid (or until you have a candidate), shrink to restore the invariant. Track best window length / sum / count.</li>
+        </ul>
+      </li>
+      <li><b>The "exactly K" trick</b>: when "exactly K distinct" is hard, compute "≤ K" – "≤ K-1".</li>
+      <li><b>If the constraint is non-monotonic</b> (e.g., negatives in a sum problem) → switch to prefix-sum + map.</li>
+    </ul>
+
+    <h2 data-cram="essential">Variable-size template</h2>
+<pre data-lang="go">// Find smallest/longest window satisfying a condition on counts/sum.
+func template(nums []int) int {
+    l, best := 0, 0
+    state := newState()
+    for r := 0; r &lt; len(nums); r++ {
+        state.add(nums[r])
+        for !state.valid() {                // shrink until valid
+            state.remove(nums[l])
+            l++
+        }
+        if r-l+1 &gt; best { best = r-l+1 }    // or update min
+    }
+    return best
+}
+</pre>
+
+    <h2 data-cram="essential">Fixed-size template</h2>
+<pre data-lang="go">// Window of size k. Add nums[r], drop nums[r-k] when r &gt;= k.
+func maxAvgSubarray(a []int, k int) float64 {
+    sum, best := 0, math.MinInt64
+    for i := 0; i &lt; len(a); i++ {
+        sum += a[i]
+        if i &gt;= k { sum -= a[i-k] }
+        if i &gt;= k-1 &amp;&amp; sum &gt; best { best = sum }
+    }
+    return float64(best) / float64(k)
+}
+</pre>
+
+    <h2>Worked examples</h2>
+
+    <h3>Longest substring without repeating characters</h3>
+<pre data-lang="go">func lengthOfLongestSubstring(s string) int {
+    last := make(map[byte]int)
+    l, best := 0, 0
+    for r := 0; r &lt; len(s); r++ {
+        if i, ok := last[s[r]]; ok &amp;&amp; i &gt;= l { l = i + 1 }
+        last[s[r]] = r
+        if r-l+1 &gt; best { best = r-l+1 }
+    }
+    return best
+}
+</pre>
+
+    <h3>Minimum window substring</h3>
+<pre data-lang="go">func minWindow(s, t string) string {
+    if len(s) &lt; len(t) { return "" }
+    var need [128]int
+    for i := 0; i &lt; len(t); i++ { need[t[i]]++ }
+    missing := len(t)
+    bl, br := -1, 0
+    l := 0
+    for r := 0; r &lt; len(s); r++ {
+        if need[s[r]] &gt; 0 { missing-- }
+        need[s[r]]--
+        for missing == 0 {
+            if bl == -1 || r-l &lt; br-bl { bl, br = l, r }
+            need[s[l]]++
+            if need[s[l]] &gt; 0 { missing++ }
+            l++
+        }
+    }
+    if bl == -1 { return "" }
+    return s[bl : br+1]
+}
+</pre>
+
+    <h3>Longest repeating character replacement</h3>
+<pre data-lang="go">// At most k changes. Window valid if (windowLen - maxFreq) &lt;= k.
+func characterReplacement(s string, k int) int {
+    var c [26]int
+    l, maxFreq, best := 0, 0, 0
+    for r := 0; r &lt; len(s); r++ {
+        c[s[r]-'A']++
+        if c[s[r]-'A'] &gt; maxFreq { maxFreq = c[s[r]-'A'] }
+        for r-l+1-maxFreq &gt; k {
+            c[s[l]-'A']--; l++
+        }
+        if r-l+1 &gt; best { best = r-l+1 }
+    }
+    return best
+}
+</pre>
+
+    <h3>Maximum in sliding window (monotonic deque)</h3>
+<pre data-lang="go">func maxSlidingWindow(a []int, k int) []int {
+    var dq []int           // stores indices, values decreasing
+    res := make([]int, 0, len(a)-k+1)
+    for i, v := range a {
+        for len(dq) &gt; 0 &amp;&amp; a[dq[len(dq)-1]] &lt; v { dq = dq[:len(dq)-1] }
+        dq = append(dq, i)
+        if dq[0] &lt;= i-k { dq = dq[1:] }
+        if i &gt;= k-1 { res = append(res, a[dq[0]]) }
+    }
+    return res
+}
+</pre>
+
+    <h2>When does sliding window work?</h2>
+    <blockquote>The condition must be <em>monotonic</em>: extending the window can only make the constraint stay valid or become invalid; shrinking can only restore validity. Without monotonicity, fall back to brute force or DP.</blockquote>
+
+    <h2 data-cram="essential">Must-do problems</h2>
+    <table>
+      <thead><tr><th>Problem</th><th>Approach</th><th>Time</th></tr></thead>
+      <tbody>
+        <tr><td>Longest Substring Without Repeating Chars</td><td>Variable + last-seen map</td><td>O(n)</td></tr>
+        <tr><td>Longest Substring with At Most K Distinct</td><td>Variable + counter, shrink while distinct &gt; K</td><td>O(n)</td></tr>
+        <tr><td>Permutation in String / Find All Anagrams</td><td>Fixed-size + counter compare</td><td>O(n)</td></tr>
+        <tr><td>Minimum Window Substring</td><td>Variable + need/missing counters</td><td>O(n)</td></tr>
+        <tr><td>Longest Repeating Character Replacement</td><td>Variable + maxFreq trick</td><td>O(n)</td></tr>
+        <tr><td>Sliding Window Maximum</td><td>Monotonic deque</td><td>O(n)</td></tr>
+        <tr><td>Sliding Window Median</td><td>Two heaps + lazy deletion</td><td>O(n log k)</td></tr>
+        <tr><td>Subarrays Product Less Than K</td><td>Variable + product</td><td>O(n)</td></tr>
+        <tr><td>Subarrays with Sum = K (positives only)</td><td>Variable + sum</td><td>O(n)</td></tr>
+        <tr><td>Fruits Into Baskets</td><td>≤ 2 distinct variant</td><td>O(n)</td></tr>
+        <tr><td>Max Consecutive Ones III</td><td>≤ k zeros allowed</td><td>O(n)</td></tr>
+        <tr><td>Subarrays with K Different Integers</td><td>"At most K" – "At most K-1"</td><td>O(n)</td></tr>
+        <tr><td>Maximum Average Subarray I</td><td>Fixed-size sum</td><td>O(n)</td></tr>
+        <tr><td>Number of Substrings Containing All 3 Chars</td><td>Variable + indices of last seen</td><td>O(n)</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Anti-patterns — what NOT to say</h2>
+    <ul>
+      <li>"I'll recompute the window aggregate every time." That's O(n) per step → O(n²) overall. Maintain it incrementally.</li>
+      <li>Using a hash map for fixed-size ASCII windows. <code class="inline">[26]int</code> / <code class="inline">[128]int</code> is faster.</li>
+      <li>Trying sliding window when negatives invalidate monotonicity → fall back to prefix-sum + map.</li>
+      <li>Re-adding the entire window in <code class="inline">map</code> when a counter would do (Permutation in String).</li>
+      <li>Forgetting that <code class="inline">delete(map, key)</code> on freq=0 is required to keep "distinct count" cheap.</li>
+    </ul>
+
+    <h2 data-cram="essential">Senior interviewer follow-ups</h2>
+    <table>
+      <thead><tr><th>Probe</th><th>What they want to hear</th></tr></thead>
+      <tbody>
+        <tr><td>"Why is the inner while loop still O(n) total?"</td><td>Each element enters and leaves the window once; <code class="inline">l</code> only moves forward.</td></tr>
+        <tr><td>"Sliding window vs two pointers — line in the sand?"</td><td>Sliding window has a <i>predicate</i> on the window contents; two-pointer is more about pair-finding / partition.</td></tr>
+        <tr><td>"How do you do Sliding Window Maximum?"</td><td>Monotonic deque: indices, values strictly decreasing; pop tail while smaller, pop head if out of window.</td></tr>
+        <tr><td>"How do you handle 'exactly K' when only ≤ K is easy?"</td><td>solve(K) – solve(K-1).</td></tr>
+        <tr><td>"What if the array contains negatives and you want subarray sum = K?"</td><td>Switch to prefix sum + count map.</td></tr>
+        <tr><td>"Stream version of longest substring without repeats?"</td><td>Same algorithm; window indices grow, last-seen map is bounded by alphabet size.</td></tr>
+      </tbody>
+    </table>
+
+    <h2 data-cram="essential">Self-check</h2>
+    <ul class="checklist" data-key="sliding-window-check">
+      <li><input type="checkbox"/><span>I can write the variable-size template from memory.</span></li>
+      <li><input type="checkbox"/><span>I can write the fixed-size template from memory.</span></li>
+      <li><input type="checkbox"/><span>I can solve Longest Substring Without Repeating in O(n).</span></li>
+      <li><input type="checkbox"/><span>I can solve Minimum Window Substring with need/missing counters.</span></li>
+      <li><input type="checkbox"/><span>I can solve Sliding Window Maximum with a monotonic deque.</span></li>
+      <li><input type="checkbox"/><span>I know the "≤ K – ≤ K-1" trick for "exactly K".</span></li>
+      <li><input type="checkbox"/><span>I can recognize when sliding window fails (negatives + sum) and switch.</span></li>
+      <li><input type="checkbox"/><span>I can solve Longest Repeating Character Replacement using the maxFreq trick.</span></li>
+      <li><input type="checkbox"/><span>I can solve Find All Anagrams via fixed-size + counter compare.</span></li>
+      <li><input type="checkbox"/><span>I can compute amortized complexity and explain why nested-while is still O(n).</span></li>
+    </ul>
+
+    <div class="footer">Next → <a href="binary-search.html">Binary search</a></div>
+  </main>
+</div>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>
