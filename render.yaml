@@ -3,4 +3,4 @@ services:
     name: go-backend-dev-prep
     runtime: static
     buildCommand: ""
-    publishPath: "."
+    staticPublishPath: "."
